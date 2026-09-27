@@ -1,8 +1,8 @@
 # ESP32 WiFi + Ethernet + SD Card + OLED Control Platform
 
-A robust embedded project built around the ESP32-P4 DevKit that combines Wi-Fi, Ethernet, SD card logging, OLED status display, local configuration portal, and UDP command control in a single firmware platform.
+A robust embedded project built around the ESP32-P4 DevKit that combines Wi-Fi, Ethernet, SD card logging, OLED status display, local configuration portal, and UDP command control in a single firmware package.
 
-This repository is organized as a set of Arduino/ESP32 `.ino` files that implement a complete device controller for monitoring and managing an ESP32-P4 system from a networked client while keeping an operation log on an SD card and showing status on an OLED display.
+This repository is organized as a set of Arduino/ESP32 `.ino` files that implement a complete device controller for monitoring and managing an ESP32-P4 system from a networked client while keeping the core responsibilities separated into dedicated modules.
 
 ---
 
@@ -140,19 +140,20 @@ Temperature Sensor:
 
 ---
 
-## Firmware Files
+## Current Project Files
 
-This repository includes the following `.ino` modules:
+This repository currently contains the following files and firmware modules:
 
 | File | Purpose | Key Functions |
 | --- | --- | --- |
+| `README.md` | Project documentation | Usage, architecture, setup and troubleshooting |
 | `wifi_Eth_SDCard.ino` | Main application entry point | `setup()`, `loop()`, global initialization |
 | `Wifi.ino` | Wi-Fi and configuration | `conectarWifi()`, `iniciarPortal()`, `salvarWifi()` |
 | `eth.ino` | Ethernet management | `onNetworkEvent()`, `configurarPrioridadeDeRede()` |
 | `sdcard.ino` | SD card operations | `inicializa_sdcard()`, `gravarLog()` |
 | `display.ino` | OLED screen rendering | `adicionarLinha()` (scrolling text buffer) |
 | `commands.ino` | UDP command processing | `executa_comando()`, `responderTudo()` |
-| `utils.ino` | Utilities and NTP | `inicializarETestarNTP()`, `imprimirDataHora()` |
+| `utils.ino` | Utilities and NTP support | `inicializarETestarNTP()`, `imprimirDataHora()` |
 
 ---
 
@@ -432,18 +433,22 @@ Install via Arduino IDE Library Manager or PlatformIO:
 
 ## Repository Structure
 
+The project currently contains the following source and documentation files in the repository root:
+
 ```
 esp32_wifi_eth_sdcard_P4/
-├── README.md                    (This file - project documentation)
-├── wifi_Eth_SDCard.ino          (Main entry point, setup/loop)
-├── Wifi.ino                     (WiFi connection & portal)
-├── eth.ino                      (Ethernet initialization)
-├── sdcard.ino                   (SD card & logging)
-├── display.ino                  (OLED rendering)
-├── commands.ino                 (UDP command processor)
-├── utils.ino                    (NTP & utilities)
+├── README.md                    (Project documentation)
+├── wifi_Eth_SDCard.ino          (Main sketch and runtime loop)
+├── Wifi.ino                     (Wi-Fi connection and portal logic)
+├── eth.ino                      (Ethernet initialization and routing)
+├── sdcard.ino                   (SD card mount, logging and file access)
+├── display.ino                  (OLED rendering and message buffer)
+├── commands.ino                 (UDP command parser and responses)
+├── utils.ino                    (NTP, clock and helper utilities)
 └── LICENSE                      (Optional - add license if desired)
 ```
+
+> Note: The current repository layout includes the core firmware modules above; if a license file is later added, it can be included here as part of the project root.
 
 ---
 
