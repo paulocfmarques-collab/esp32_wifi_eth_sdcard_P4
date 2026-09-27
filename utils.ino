@@ -5,6 +5,7 @@ void imprimirDataHora()
   // Tenta obter o horário local configurado na pilha lwIP
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Falha ao obter estrutura de tempo local");
+    gravarLog("Falha ao obter estrutura de tempo local");
     return;
   }
 
@@ -16,13 +17,35 @@ void imprimirDataHora()
   sprintf(bufferData, "%02d/%02d/%04d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
   sprintf(bufferHora, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 
-  // Print de validação no Monitor Serial
+//  // Print de validação no Monitor Serial
   Serial.printf("%s - %s\n", bufferData, bufferHora);
 
   // Envia formatado corretamente para a sua função de empilhar linhas no OLED
-  // (Substitua "adicionarLinha" pelo nome exato da sua função de escrita do OLED se for diferente)
   String dataHoraCompleta = String(bufferData) + " - " + String(bufferHora);
   adicionarLinha(dataHoraCompleta); 
+}
+
+void GetDataHora()
+{
+  struct tm timeinfo;
+  
+  // Tenta obter o horário local configurado na pilha lwIP
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Falha ao obter estrutura de tempo local");
+    gravarLog("Falha ao obter estrutura de tempo local");
+    return;
+  }
+
+  // Criamos buffers de texto estáticos para evitar lixo de memória (Garbage bytes)
+  char bufferData[12]; // "DD/MM/AAAA\0"
+  char bufferHora[9];  // "HH:MM:SS\0"
+
+  // Formata os dados de maneira segura nas variáveis de texto
+  sprintf(bufferData, "%02d/%02d/%04d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
+  sprintf(bufferHora, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+  String dataHoraCompleta = String(bufferData) + " - " + String(bufferHora);
+  responderTudo(dataHoraCompleta+"\n"); 
 }
 
 void testarNTP_Status() {

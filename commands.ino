@@ -1,5 +1,31 @@
+void responderTudo(String msg, bool bLog=true) {
+  // 1. Envia para a Serial
+  Serial.print(msg);
+  
+  // 2. Envia para o OLED (limpando quebras de linha para não quebrar o layout)
+  String msgOled = msg;
+  msgOled.replace("\n", "");
+  if (msgOled.length() > 0) {
+    adicionarLinha(msgOled);
+  }
+
+  // 3. Envia via UDP (Apenas se houver um cliente ativo)
+  if (udp.remoteIP()) {
+    udp.beginPacket(udp.remoteIP(), udp.remotePort());
+    udp.print(msg);
+    udp.endPacket();
+  }
+  if(bLog)
+  {
+    gravarLog(msg);
+  }
+}
+
 void executa_comando(String cmd) {
+  char *pMsg = (char *) calloc(255, sizeof(char));
+
   adicionarLinha("> " + cmd);
+  gravarLog("> " + cmd);
 
   if (cmd == "RESET_WIFI") {
     zerarConfiguracoes(); 
@@ -22,44 +48,40 @@ void executa_comando(String cmd) {
   }
   else if (cmd == "CPU") // Informações sobre a CPU
   {
-    //Serial.println(udp.remoteIP());
-    //Serial.println(udp.remotePort());
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Modelo: %s\n", ESP.getChipModel());
-    udp.printf("Revisao: %d\n", ESP.getChipRevision());
-    udp.printf("Nucleos: %d\n", ESP.getChipCores());
-    udp.printf("CPU: %d MHz\n", ESP.getCpuFreqMHz());
-    udp.printf("RAM livre: %u bytes\n", ESP.getFreeHeap());
-    udp.endPacket();
+    sprintf(pMsg,"Modelo: %s\nRevisao: %d\nNucleos: %d\nCPU: %d MHz\nRAM livre: %u bytes\n",
+                  ESP.getChipModel(),
+                  ESP.getChipRevision(),
+                  ESP.getChipCores(),
+                  ESP.getCpuFreqMHz(),
+                  ESP.getFreeHeap());
+    responderTudo(pMsg);
   }
   else if (cmd == "RAM") // Informações sobre a RAM
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Heap livre: %u\n", ESP.getFreeHeap());
-    udp.printf("Menor heap livre: %u\n", ESP.getMinFreeHeap());
-    udp.printf("Maior bloco livre: %u\n", ESP.getMaxAllocHeap());
-    udp.endPacket();
+    sprintf(pMsg,"Heap livre: %u\nMenor heap livre: %u\nMaior bloco livre: %u\n",
+                  ESP.getFreeHeap(),
+                  ESP.getMinFreeHeap(),
+                  ESP.getMaxAllocHeap());
+    responderTudo(pMsg);
   }
   else if (cmd == "FLASH") // Informações sobre a flash
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Flash total: %u\n", ESP.getFlashChipSize());
-    udp.printf("Velocidade Flash: %u\n", ESP.getFlashChipSpeed());
-    udp.printf("Tamanho Sketch: %u\n", ESP.getSketchSize());
-    udp.printf("Espaco livre: %u\n", ESP.getFreeSketchSpace());
-    udp.endPacket();
+    sprintf(pMsg,"Flash total: %u\nVelocidade Flash: %u\nTamanho Sketch: %u\nEspaco livre: %u\n", 
+                  ESP.getFlashChipSize(),
+                  ESP.getFlashChipSpeed(),
+                  ESP.getSketchSize(),
+                  ESP.getFreeSketchSpace());
+    responderTudo(pMsg);
   }
   else if (cmd == "INIT") // Motivo do reset
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Motivo reset: %d\n", esp_reset_reason());    
-    udp.endPacket();
+    sprintf(pMsg,"Motivo reset: %d\n", esp_reset_reason());
+    responderTudo(pMsg);
   }
   else if (cmd == "UPTIME") // Tempo ligado
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Uptime: %lu ms\n", millis());    
-    udp.endPacket();
+    sprintf(pMsg,"Uptime: %lu ms\n", millis());
+    responderTudo(pMsg);
   }
   else if (cmd == "MAC") // MAC address
   {
@@ -67,17 +89,14 @@ void executa_comando(String cmd) {
   }
   else if (cmd == "NET_INFO") // MAC address
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("IP: ");
-    udp.println(WiFi.localIP());
-    udp.printf("Gateway: ");
-    udp.println(WiFi.gatewayIP());
-    udp.printf("Mascara de rede: ");
-    udp.println(WiFi.subnetMask());
-    udp.printf("RSSI: %d dbm\n", WiFi.RSSI());
-    udp.printf("Nome da Rede: %s\n", WiFi.SSID());
-    udp.endPacket();
-    }  
+    sprintf(pMsg, "IP: %s\nGateway: %s\nMascara de rede: %s\nRSSI: %d dbm\nNome da Rede: %s\n",
+                  WiFi.localIP().toString().c_str(),
+                  WiFi.gatewayIP().toString().c_str(),
+                  WiFi.subnetMask().toString().c_str(),
+                  WiFi.RSSI(),
+                  WiFi.SSID());
+    responderTudo(pMsg);
+  }  
   else if (cmd.startsWith("LED_PISCA")) // Comando para piscar o LED uma quantidade de vezes
   {
     int piscadas = 10;
@@ -98,9 +117,8 @@ void executa_comando(String cmd) {
       digitalWrite(LED, LOW);   delay(tempo);
     }
 
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("LED piscou %d vezes com %d ms\n", piscadas, tempo);
-    udp.endPacket();
+    sprintf(pMsg,"LED piscou %d vezes com %d ms\n", piscadas, tempo);
+    responderTudo(pMsg);
   }
   else if (cmd.startsWith("LED_BLINK")) // Comando para piscar led com tempo
   {
@@ -113,9 +131,8 @@ void executa_comando(String cmd) {
 
     blinkAtivo = true;
 
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.printf("Blink iniciado (%lu ms)\n", intervaloBlink);
-    udp.endPacket();
+    sprintf(pMsg,"Blink iniciado (%lu ms)\n", intervaloBlink);
+    responderTudo(pMsg);
   }
   else if (cmd == "LIST") {
     if (!sdcardOk) {
@@ -157,15 +174,16 @@ void executa_comando(String cmd) {
         if (!arquivo || arquivo.isDirectory()) {
           responderTudo("Falha ao abrir: " + caminho + "\n");
         } else {
-          responderTudo("--- Lendo: " + caminho + " ---\n");
+          responderTudo("--- Lendo: " + caminho + " ---\n", false);
           
           // Lê o arquivo linha por linha para enviar de forma estruturada
           while (arquivo.available()) {
             String linhaArq = arquivo.readStringUntil('\n');
             linhaArq += "\n";
-            responderTudo(linhaArq);
+            responderTudo(linhaArq, false);
           }
-          responderTudo("--- Fim do Arquivo ---\n");
+          responderTudo("--- Fim do Arquivo ---\n", false);
+          responderTudo("Comando executado com sucesso!\n");
           arquivo.close();
         }
       }
@@ -193,12 +211,15 @@ void executa_comando(String cmd) {
       }
     }
   }
+  else if (cmd == "TIME") // MAC address
+  {
+    GetDataHora();
+  }
   else 
   {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.print("Comando Invalido\n");
-    udp.endPacket();
+    responderTudo("Comando Invalido\n");
   }
+  free(pMsg);
 }
 
 float lerTemperaturaP4() {
@@ -214,23 +235,4 @@ float lerTemperaturaP4() {
   temperature_sensor_get_celsius(temp_sensor, &tsens_out);
   temperature_sensor_disable(temp_sensor);
   return tsens_out;
-}
-
-void responderTudo(String msg) {
-  // 1. Envia para a Serial
-  Serial.print(msg);
-  
-  // 2. Envia para o OLED (limpando quebras de linha para não quebrar o layout)
-  String msgOled = msg;
-  msgOled.replace("\n", "");
-  if (msgOled.length() > 0) {
-    adicionarLinha(msgOled);
-  }
-
-  // 3. Envia via UDP (Apenas se houver um cliente ativo)
-  if (udp.remoteIP()) {
-    udp.beginPacket(udp.remoteIP(), udp.remotePort());
-    udp.print(msg);
-    udp.endPacket();
-  }
 }
