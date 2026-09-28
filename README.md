@@ -26,82 +26,69 @@ This design is intended for embedded monitoring, remote diagnostics, data acquis
 
 ### High-level functional block diagram
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ESP32-P4 DevKit                          │
-│                                                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ WiFi STA/AP  │  │ Ethernet PHY │  │ OLED Display │     │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
-│         │                 │                  │             │
-│         └─────────────────┼──────────────────┘             │
-│                           │                                │
-│  ┌──────────────┐  ┌──────┴───────┐  ┌──────────────┐     │
-│  │ SD Card Log  │  │ NTP Time Sync│  │ GPIO / LED   │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │         Temperature Sensor (Internal P4)             │  │
-│  └──────────────────────────────────────────────────────┘  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-        ↑                                       ↓
-        │ UDP Commands (Port 4210)              │ Status/Telemetry
-        │                                       │
-   [Client PC]                                  [Responses]
+```mermaid
+flowchart TD
+
+    WIFI[WiFi STA AP]
+    ETH[Ethernet PHY]
+    OLED[OLED Display]
+
+    WIFI --> CORE[ESP32-P4 DevKit]
+    ETH --> CORE
+    OLED --> CORE
+
+    CORE --> SD[SD Card Logging]
+    CORE --> NTP[NTP Time Sync]
+    CORE --> GPIO[GPIO LED]
+
+    TEMP[Internal Temperature Sensor] --> CORE
+
+    CLIENT[Client PC]
+    CLIENT <-->|UDP 4210| CORE
+
+    CORE --> TELEMETRY[Status Telemetry]
 ```
 
 ### Hardware dataflow
 
-```
-Client / Host (PC / app / script)
-          |
-          | UDP packet (port 4210)
-          v
-┌─────────────────────────────┐
-│ ESP32-P4 DevKit             │
-│                             │
-│ WiFi STA / AP              │
-│ Ethernet PHY               │
-│ NTP Sync                   │
-│ Preferences storage        │
-│ SD card logging            │
-│ OLED status display        │
-│ GPIO control               │
-│ Temperature Sensor         │
-└────────┬────────┬─────┬────┘
-         │        │     │
-         v        v     v
-      [LED]   [OLED]  [SDCard]
-              Status   Log File
+```mermaid
+flowchart TD
+
+    CLIENT[Client Host<br/>PC App Script]
+
+    CLIENT -->|UDP 4210| ESP[ESP32-P4 DevKit]
+
+    ESP --> WIFI[WiFi STA AP]
+    ESP --> ETH[Ethernet PHY]
+    ESP --> NTP[NTP Sync]
+    ESP --> PREFS[Preferences]
+    ESP --> SD[SD Card Logging]
+    ESP --> OLED[OLED Display]
+    ESP --> GPIO[GPIO Control]
+    ESP --> TEMP[Temperature Sensor]
+
+    ESP --> LED[LED]
+    ESP --> OLEDSTATUS[OLED Status]
+    ESP --> SDFILES[Log Files]
 ```
 
 ### Pin configuration diagram
 
-```
-ESP32-P4 DevKit Pins
-════════════════════════════════════════════════════════════
+```mermaid
+flowchart LR
 
-I2C Interface (OLED):
-  GPIO7  ──────── SDA (Serial Data)
-  GPIO8  ──────── SCL (Serial Clock)
+    SDA[GPIO7] --> OLED1[OLED SDA]
+    SCL[GPIO8] --> OLED2[OLED SCL]
 
-LED Control:
-  GPIO1  ──────── LED (Output)
+    GPIO1[GPIO1] --> LED[Status LED]
 
-Reset Button:
-  GPIO2  ──────── RESET (Input, Pull-up)
+    GPIO2[GPIO2] --> RESET[Reset Button]
 
-Ethernet (RMII/PHY):
-  GPIO31 ──────── MDC (Management Data Clock)
-  GPIO52 ──────── MDIO (Management Data Input/Output)
-  GPIO51 ──────── PHY Power/Reset
+    GPIO31[GPIO31] --> MDC[Ethernet MDC]
+    GPIO52[GPIO52] --> MDIO[Ethernet MDIO]
+    GPIO51[GPIO51] --> PHY[PHY Power Reset]
 
-SD Card (native hardware):
-  (Slot 0 - no external wiring needed on DevKit)
-
-Temperature Sensor:
-  (Internal - no GPIO required)
+    INTERNAL[Internal Sensor] --> TEMP[Temperature Sensor]
 ```
 
 ---
@@ -176,41 +163,27 @@ This repository currently contains the following files and firmware modules:
 
 ### Wi-Fi and configuration flow
 
-```
-Power On / Reset
-     |
-     v
-Initialize Hardware (GPIO, I2C, SD Card)
-     |
-     v
-Check Stored WiFi Credentials
-     |
-     +──── Yes ──────→ Connect to WiFi (STA mode)
-     |                       |
-     |                       v
-     |                 Enable UDP Listener
-     |                       |
-     |                       v
-     |                 Sync Time with NTP
-     |                       |
-     |                       v
-     |                 Ready for Commands
-     |
-     +──── No ───────→ Start Access Point
-                      SSID: ESP32_P4_CONFIG
-                             |
-                             v
-                      Serve Config Portal
-                      (http://192.168.4.1)
-                             |
-                             v
-                      User enters SSID+Password
-                             |
-                             v
-                      Save to Flash Storage
-                             |
-                             v
-                      Restart Device
+```mermaid
+flowchart TD
+
+    A[Power On Reset]
+    A --> B[Initialize GPIO I2C SD Card]
+    B --> C[Check Stored WiFi Credentials]
+
+    C --> D{Credentials Found?}
+
+    D -->|Yes| E[Connect WiFi STA]
+    E --> F[Start UDP Listener]
+    F --> G[Sync NTP Time]
+    G --> H[Ready for Commands]
+
+    D -->|No| I[Start Access Point]
+
+    I --> J[SSID ESP32_P4_CONFIG]
+    J --> K[Serve Portal 192.168.4.1]
+    K --> L[User Enters SSID Password]
+    L --> M[Save to Flash]
+    M --> N[Restart Device]
 ```
 
 ---
@@ -268,26 +241,23 @@ echo "NET_INFO" | nc -u 192.168.1.100 4210
 
 When no Wi-Fi credentials are stored, the ESP32 starts an access point:
 
-```
-Network Name (SSID):  ESP32_P4_CONFIG
-IP Address:           192.168.4.1
-No password required
-```
+```mermaid
+flowchart TD
 
-Connect to this network and open a browser to `http://192.168.4.1` to see the configuration form:
+    WIFI[Conectar ao AP ESP32_P4_CONFIG]
+    WIFI --> BROWSER[Abrir navegador 192.168.4.1]
 
-```
-┌──────────────────────────────┐
-│  Configuração WiFi - ESP32-P4│
-├──────────────────────────────┤
-│ SSID:                        │
-│ [________________________]   │
-│                              │
-│ Senha:                       │
-│ [________________________]   │
-│                              │
-│          [ Salvar ]          │
-└──────────────────────────────┘
+    BROWSER --> FORM[Formulario WiFi]
+
+    FORM --> SSID[Informar SSID]
+    FORM --> PASS[Informar Senha]
+
+    SSID --> SAVE[Salvar]
+    PASS --> SAVE
+
+    SAVE --> FLASH[Gravar em Preferences]
+    FLASH --> REBOOT[Reiniciar ESP32]
+    REBOOT --> CONNECT[Conectar na nova rede]
 ```
 
 After saving, the device stores credentials in non-volatile memory and restarts to connect automatically.
@@ -435,17 +405,20 @@ Install via Arduino IDE Library Manager or PlatformIO:
 
 The project currently contains the following source and documentation files in the repository root:
 
-```
-esp32_wifi_eth_sdcard_P4/
-├── README.md                    (Project documentation)
-├── wifi_Eth_SDCard.ino          (Main sketch and runtime loop)
-├── Wifi.ino                     (Wi-Fi connection and portal logic)
-├── eth.ino                      (Ethernet initialization and routing)
-├── sdcard.ino                   (SD card mount, logging and file access)
-├── display.ino                  (OLED rendering and message buffer)
-├── commands.ino                 (UDP command parser and responses)
-├── utils.ino                    (NTP, clock and helper utilities)
-└── LICENSE                      (Optional - add license if desired)
+```mermaid
+flowchart TD
+
+    ROOT[esp32_wifi_eth_sdcard_P4]
+
+    ROOT --> README[README.md]
+    ROOT --> MAIN[wifi_Eth_SDCard.ino]
+    ROOT --> WIFI[Wifi.ino]
+    ROOT --> ETH[eth.ino]
+    ROOT --> SDCARD[sdcard.ino]
+    ROOT --> DISPLAY[display.ino]
+    ROOT --> COMMANDS[commands.ino]
+    ROOT --> UTILS[utils.ino]
+    ROOT --> LICENSE[LICENSE]
 ```
 
 > Note: The current repository layout includes the core firmware modules above; if a license file is later added, it can be included here as part of the project root.
