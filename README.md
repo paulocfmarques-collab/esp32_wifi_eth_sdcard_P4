@@ -1,8 +1,8 @@
 # ESP32 WiFi + Ethernet + SD Card + OLED Control Platform
 
-A robust embedded project built around the ESP32-P4 DevKit that combines Wi-Fi, Ethernet, SD card logging, OLED status display, local configuration portal, and UDP command control in a single firmware package.
+A robust embedded project built around the ESP32-P4 DevKit that combines Wi-Fi, Ethernet, SD card logging, OLED status display, local configuration portal, and UDP command control in a single firmware platform.
 
-This repository is organized as a set of Arduino/ESP32 `.ino` files that implement a complete device controller for monitoring and managing an ESP32-P4 system from a networked client while keeping the core responsibilities separated into dedicated modules.
+This repository is organized as an Arduino/ESP32 sketch plus a set of C++ helper modules for device configuration, networking, display, storage, time handling, and remote command processing.
 
 ---
 
@@ -131,16 +131,21 @@ flowchart LR
 
 This repository currently contains the following files and firmware modules:
 
-| File | Purpose | Key Functions |
+| File | Purpose | Key Functions / Components |
 | --- | --- | --- |
-| `README.md` | Project documentation | Usage, architecture, setup and troubleshooting |
-| `wifi_Eth_SDCard.ino` | Main application entry point | `setup()`, `loop()`, global initialization |
-| `Wifi.ino` | Wi-Fi and configuration | `conectarWifi()`, `iniciarPortal()`, `salvarWifi()` |
-| `eth.ino` | Ethernet management | `onNetworkEvent()`, `configurarPrioridadeDeRede()` |
-| `sdcard.ino` | SD card operations | `inicializa_sdcard()`, `gravarLog()` |
-| `display.ino` | OLED screen rendering | `adicionarLinha()` (scrolling text buffer) |
-| `commands.ino` | UDP command processing | `executa_comando()`, `responderTudo()` |
-| `utils.ino` | Utilities and NTP support | `inicializarETestarNTP()`, `imprimirDataHora()` |
+| `README.md` | Project documentation | Overview, architecture, setup, troubleshooting |
+| `wifi_Eth_SDCard.ino` | Main firmware entry point | `setup()`, `loop()`, application orchestration |
+| `DeviceConfig.h` | Hardware and compile-time settings | network defaults, pin mapping, PHY and timing constants |
+| `NetworkController.h` | Network interface abstraction | Wi-Fi/Ethernet mode handling and priority logic |
+| `NetworkController.cpp` | Network implementation | connectivity setup, AP/STA behavior, network state control |
+| `OledDisplay.h` | OLED driver interface | display initialization and drawing API |
+| `OledDisplay.cpp` | OLED implementation | status rendering, scrolling messages, screen updates |
+| `SlaveCommandHandler.h` | Command interface definition | command parser API and handler declarations |
+| `SlaveCommandHandler.cpp` | UDP command processing | command interpretation, telemetry responses, remote actions |
+| `StorageManager.h` | Storage abstraction | SD mount and file access interface |
+| `StorageManager.cpp` | Storage implementation | SD card initialization, file listing, log/file operations |
+| `TimeManager.h` | Time synchronization interface | NTP and timestamp helpers |
+| `TimeManager.cpp` | Time implementation | NTP sync, timezone handling, log time formatting |
 
 ---
 
@@ -354,8 +359,8 @@ Install via Arduino IDE Library Manager or PlatformIO:
 
 ## Important Notes
 
-- **PHY Type:** Uses `ETH_PHY_IP101` by default. If you see "Caso apresente erro de ID, use ETH_PHY_GENERIC", change the define in `eth.ino`
-- **Route Priority:** WiFi is set as the primary route (priority 50), Ethernet as secondary (priority 10). Adjust in `configurarPrioridadeDeRede()` if needed
+- **PHY Type:** Uses `ETH_PHY_IP101` by default. If you see "Caso apresente erro de ID, use ETH_PHY_GENERIC", change the define in `DeviceConfig.h`
+- **Route Priority:** WiFi is set as the primary route (priority 50), Ethernet as secondary (priority 10). Adjust in `NetworkController.cpp` if needed
 - **Configuration Recovery:** Press the reset button (GPIO2) to clear stored WiFi settings without reflashing
 - **LED Indicator:** The LED (GPIO1) shows device state and can be controlled or blinked via commands
 - **Preferences Storage:** WiFi credentials are stored in ESP32 non-volatile flash using the `Preferences` API
@@ -412,16 +417,15 @@ flowchart TD
 
     ROOT --> README[README.md]
     ROOT --> MAIN[wifi_Eth_SDCard.ino]
-    ROOT --> WIFI[Wifi.ino]
-    ROOT --> ETH[eth.ino]
-    ROOT --> SDCARD[sdcard.ino]
-    ROOT --> DISPLAY[display.ino]
-    ROOT --> COMMANDS[commands.ino]
-    ROOT --> UTILS[utils.ino]
-    ROOT --> LICENSE[LICENSE]
+    ROOT --> DEVICE[DeviceConfig.h]
+    ROOT --> NETWORK[NetworkController.cpp / .h]
+    ROOT --> OLED[OledDisplay.cpp / .h]
+    ROOT --> SLAVE[SlaveCommandHandler.cpp / .h]
+    ROOT --> STORAGE[StorageManager.cpp / .h]
+    ROOT --> TIME[TimeManager.cpp / .h]
 ```
 
-> Note: The current repository layout includes the core firmware modules above; if a license file is later added, it can be included here as part of the project root.
+> Note: The repository currently uses the modular structure above. The root-level files reflect the active implementation present in the project today.
 
 ---
 
