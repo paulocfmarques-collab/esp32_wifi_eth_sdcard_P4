@@ -10,6 +10,8 @@
 #include "OledDisplay.h"
 #include "StorageManager.h"
 
+#define NUM_REDES 5
+
 class NetworkController {
 private:
   WebServer _server;
@@ -20,15 +22,23 @@ private:
 
   static NetworkController* _instance;
   volatile bool _dadosProntosParaSalvar;
-  String _tempSSID;
-  String _tempSenha;
+  bool _rotasOk;
+  String _tmpS[NUM_REDES];
+  String _tmpP[NUM_REDES];
 
   static void onNetworkEvent(arduino_event_id_t event, arduino_event_info_t info);
   static void handleRootCallback() { if (_instance) _instance->handleRoot(); }
   static void handleSaveCallback() { if (_instance) _instance->handleSave(); }
+  static void handleInfoCallback() { if (_instance) _instance->handleInfo(); }
+  static void handleWifiCallback() { if (_instance) _instance->handleWifi(); }
 
   void handleRoot();
   void handleSave();
+  void handleInfo();
+  void handleWifi();
+  void configurarRotas();
+  bool tentarRede(const String& ssid, const String& senha);
+  void carregarRedes(String ssids[NUM_REDES], String senhas[NUM_REDES], int& idx);
 
 public:
   static bool ethConectado;

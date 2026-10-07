@@ -1,20 +1,64 @@
 #include "SlaveCommandHandler.h"
 #include "SD_MMC.h"
+#include <esp_system.h>
 
-#define FIRMWARE_VERSION "v1.4.2"
+#define FIRMWARE_VERSION "v1.4.3"
 
 static String _ultimoComando = "Nenhum";
 static uint32_t _totalComandos = 0;
 
+static String normalizarCaminho(String c) {
+  c.trim();
+  if (!c.startsWith("/")) c = "/" + c;
+  return c;
+}
+
+static const char* motivoReset() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "Power-on";
+    case ESP_RST_EXT:       return "Reset externo";
+    case ESP_RST_SW:        return "Reset por software";
+    case ESP_RST_PANIC:     return "Panic";
+    case ESP_RST_INT_WDT:   return "Watchdog interrupcao";
+    case ESP_RST_TASK_WDT:  return "Watchdog tarefa";
+    case ESP_RST_WDT:       return "Watchdog";
+    case ESP_RST_DEEPSLEEP: return "Deep sleep";
+    case ESP_RST_BROWNOUT:  return "Brownout";
+    default:                return "Desconhecido";
+  }
+}
 
 SlaveCommandHandler::SlaveCommandHandler(OledDisplay& o, StorageManager& s, NetworkController& n, TimeManager& t)
   : _oled(o), _storage(s), _net(n), _time(t) {}
 
 void SlaveCommandHandler::executar(String cmd) {
   cmd.trim();
-  
-  // Ignora o salvamento e contagem se for o próprio comando de consulta de histórico
-  if (cmd != "LASTCMD" && cmd != "CMDCOUNT") {
+
+  // Nome do comando em minusculas; o argumento (apos ':') preserva a caixa original
+  String arg = "";
+  String nome = cmd;
+  int sep = cmd.indexOf(':');
+  if (sep != -1) {
+    nome = cmd.substring(0, sep);
+    arg = cmd.substring(sep + 1);
+  }
+  nome.trim();
+  nome.toLowerCase();
+
+  // Apelidos dos nomes antigos
+  if (nome == "restart") nome = "reboot";
+  else if (nome == "list") nome = "sd_list";
+  else if (nome == "read") nome = "sd_read";
+  else if (nome == "write") nome = "sd_write";
+  else if (nome == "delete") nome = "sd_del";
+  else if (nome == "exists") nome = "sd_exists";
+  else if (nome == "size") nome = "sd_size";
+  else if (nome == "tail") nome = "sd_tail";
+  else if (nome == "sd_info") nome = "sd_status";
+  else if (nome == "set_tz") nome = "set_fuso";
+  else if (nome == "set_dst") nome = "dst";
+
+  if (nome != "lastcmd" && nome != "cmdcount") {
     _ultimoComando = cmd;
     _totalComandos++;
   }
@@ -22,171 +66,39 @@ void SlaveCommandHandler::executar(String cmd) {
   _oled.adicionarLinha("> " + cmd);
   _storage.gravarLog("> " + cmd);
 
-  char* pMsg = (char*)calloc(512, sizeof(char)); // Expandido para 512 para o bloco INFO
+  char* pMsg = (char*)calloc(512, sizeof(char));
   if (!pMsg) return;
-  
-  if (cmd == "LASTCMD") {
+
+  const bool sdPrecisa = nome.startsWith("sd_");
+  if (sdPrecisa && !_storage.isAtivo()) {
+    _storage.gravarLog("[ERRO] Comando " + nome + " rejeitado: Cartao SD inacessivel.");
+    _net.responderUDP("Erro: SD inacessivel\n");
+    free(pMsg);
+    return;
+  }
+
+  // ─── Sistema ───
+  if (nome == "lastcmd") {
     _net.responderUDP("Ultimo Comando: " + _ultimoComando + "\n");
   }
-  else if (cmd == "CMDCOUNT") {
-    sprintf(pMsg, "Total Comandos: %u\n", _totalComandos);
+  else if (nome == "cmdcount") {
+    sprintf(pMsg, "Total Comandos: %u\n", (unsigned)_totalComandos);
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "VERSION") {
-      _net.responderUDP("Central Mestre:\nVersao Firmware: v1.4.3\n");
+  else if (nome == "alive") {
+    _net.responderUDP("ALIVE\n");
   }
-  else if (cmd.startsWith("TAIL:")) 
-  {
-    if (!_storage.isAtivo()) {
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      String dadosGerais = cmd.substring(5); dadosGerais.trim();
-      int linhasDesejadas = 10; // Padrão
-      String caminho = dadosGerais;
-
-      int indiceSeparador = dadosGerais.indexOf(':');
-      if (indiceSeparador != -1) {
-        caminho = dadosGerais.substring(0, indiceSeparador);
-        linhasDesejadas = dadosGerais.substring(indiceSeparador + 1).toInt();
-        if (linhasDesejadas <= 0) linhasDesejadas = 10;
-      }
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (!SD_MMC.exists(caminho)) {
-        _net.responderUDP("Arquivo nao existe\n");
-      } else {
-        File arquivo = SD_MMC.open(caminho, FILE_READ);
-        if (!arquivo || arquivo.isDirectory()) {
-          _net.responderUDP("Falha ao abrir arquivo\n");
-        } else {
-          // Estratégia rápida: Contar total de linhas do arquivo
-          int totalLinhasArquivo = 0;
-          while (arquivo.available()) {
-            arquivo.readStringUntil('\n');
-            totalLinhasArquivo++;
-          }
-          
-          // Calcula a partir de qual linha deve começar a transmitir
-          int linhaInicial = totalLinhasArquivo - linhasDesejadas;
-          if (linhaInicial < 0) linhaInicial = 0;
-
-          // Volta para o começo e pula até a linha correta
-          arquivo.seek(0);
-          int linhaAtual = 0;
-          while (linhaAtual < linhaInicial && arquivo.available()) {
-            arquivo.readStringUntil('\n');
-            linhaAtual++;
-          }
-
-          // Transmite apenas o final solicitado
-          _net.responderUDP("--- TAIL: " + caminho + " ---\n");
-          while (arquivo.available()) {
-            _net.responderUDP(arquivo.readStringUntil('\n') + "\n");
-          }
-          _net.responderUDP("--- Fim do Bloco ---\n");
-          arquivo.close();
-        }
-      }
-    }
+  else if (nome == "version") {
+    _net.responderUDP("Versao Firmware: " FIRMWARE_VERSION "\n");
   }
-  else if (cmd.startsWith("WRITE:")) {
-    if (!_storage.isAtivo()) {
-      _storage.gravarLog("[ERRO] Comando WRITE rejeitado: Cartao SD inacessivel.");
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      // Remove o prefixo "WRITE:"
-      String dadosGerais = cmd.substring(6); 
-      dadosGerais.trim();
-      
-      // Encontra o separador "=" entre o caminho do arquivo e o conteúdo do usuário
-      int indiceSeparador = dadosGerais.indexOf('=');
-      
-      if (indiceSeparador == -1) {
-        _net.responderUDP("Erro: Formato invalido. Use WRITE:/arquivo.txt=conteudo\n");
-      } else {
-        String caminho = dadosGerais.substring(0, indiceSeparador);
-        String conteudo = dadosGerais.substring(indiceSeparador + 1);
-        caminho.trim();
-        
-        if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-        // Abre o arquivo em modo FILE_WRITE (limpa e sobrescreve se o arquivo já existir)
-        File arquivo = SD_MMC.open(caminho, FILE_WRITE);
-        if (!arquivo) {
-          _storage.gravarLog("[ERRO] Falha critica ao criar/abrir arquivo para escrita: " + caminho);
-          _net.responderUDP("Erro ao abrir arquivo\n");
-        } else {
-          arquivo.print(conteudo);
-          arquivo.close();
-          _storage.gravarLog("[SD] Arquivo gravado com sucesso: " + caminho);
-          _net.responderUDP("Ok\n");
-        }
-      }
-    }
+  else if (nome == "build") {
+    sprintf(pMsg, "Compilacao:\nData: %s\nHora: %s\n", __DATE__, __TIME__);
+    _net.responderUDP(pMsg);
   }
-  else if (cmd.startsWith("DELETE:")) {
-    if (!_storage.isAtivo()) {
-      _storage.gravarLog("[ERRO] Comando DELETE rejeitado: Cartao SD inacessivel.");
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      String caminho = cmd.substring(7);
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (!SD_MMC.exists(caminho)) {
-        _net.responderUDP("Arquivo nao existe\n");
-      } else {
-        if (SD_MMC.remove(caminho)) {
-          _storage.gravarLog("[SD] Arquivo excluido com sucesso: " + caminho);
-          _net.responderUDP("Ok\n");
-        } else {
-          _storage.gravarLog("[ERRO] Falha ao tentar excluir o arquivo: " + caminho);
-          _net.responderUDP("Erro ao deletar arquivo\n");
-        }
-      }
-    }
+  else if (nome == "reason") {
+    _net.responderUDP(String("Reset: ") + motivoReset() + "\n");
   }
-  else if (cmd.startsWith("EXISTS:")) {
-    if (!_storage.isAtivo()) {
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      String caminho = cmd.substring(7); 
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (SD_MMC.exists(caminho)) {
-        _net.responderUDP("Existe\n");
-      } else {
-        _net.responderUDP("Nao existe\n");
-      }
-    }
-  }
-  else if (cmd.startsWith("SIZE:")) {
-    if (!_storage.isAtivo()) {
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      String caminho = cmd.substring(5); 
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (!SD_MMC.exists(caminho)) {
-        _net.responderUDP("Arquivo nao existe\n");
-      } else {
-        File arquivo = SD_MMC.open(caminho, FILE_READ);
-        if (!arquivo || arquivo.isDirectory()) {
-          _net.responderUDP("Falha ao abrir arquivo\n");
-        } else {
-          uint32_t tamanhoBytes = arquivo.size();
-          arquivo.close();
-          sprintf(pMsg, "Tamanho: %u B\n", tamanhoBytes);
-          _net.responderUDP(pMsg);
-        }
-      }
-    }
-  }
-  else if (cmd == "INFO")
-  {
+  else if (nome == "info") {
     struct tm timeinfo;
     char dataBuf[12] = "Sem Sinc.";
     char horaBuf[10] = "Sem Sinc.";
@@ -194,338 +106,302 @@ void SlaveCommandHandler::executar(String cmd) {
       sprintf(dataBuf, "%02d/%02d/%04d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
       sprintf(horaBuf, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     }
-
-    String statusSD = _storage.isAtivo() ? "OK" : "FALHA";
-    uint32_t heapLivre = ESP.getFreeHeap() / 1024;
-    // Espaço livre aproximado do Sketch na Flash convertida para MB
-    float flashLivre = (float)ESP.getFreeSketchSpace() / (1024.0 * 1024.0); 
-
-    // Monta o cabeçalho completo dinâmico baseado no modelo solicitado
-    sprintf(pMsg, 
-            "===== DEVICE INFO =====\n"
-            "Hostname: %s\n"
-            "Firmware: %s\n"
-            "Build: %s %s\n"
-            "SSID: %s\n"
-            "IP: %s\n"
-            "MAC: %s\n"
-            "RSSI: %d dBm\n"
-            "Heap Livre: %u KB\n"
-            "Flash Livre: %.1f MB\n"
-            "SD Card: %s\n"
-            "Data: %s\n"
-            "Hora: %s\n"
-            "Uptime: %lu ms\n"
-            "=======================\n",
-            ETH.getHostname(), // Ou WiFi.getHostname() dependendo de qual interface você quer printar
-            "1.0.2", 
-            __DATE__, __TIME__,
-            WiFi.SSID().c_str(),
-            (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString().c_str() : ETH.localIP().toString().c_str(),
-            WiFi.macAddress().c_str(),
-            WiFi.RSSI(),
-            heapLivre,
-            flashLivre,
-            statusSD.c_str(),
-            dataBuf,
-            horaBuf,
-            millis()
-    );
-    
+    String ip = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : ETH.localIP().toString();
+    snprintf(pMsg, 512,
+             "===== DEVICE INFO =====\n"
+             "Hostname: %s\n"
+             "Firmware: %s\n"
+             "Build: %s %s\n"
+             "SSID: %s\n"
+             "IP: %s\n"
+             "MAC: %s\n"
+             "RSSI: %d dBm\n"
+             "Heap Livre: %u KB\n"
+             "SD Card: %s\n"
+             "Data: %s\n"
+             "Hora: %s\n"
+             "Uptime: %lu ms\n"
+             "=======================\n",
+             ETH.getHostname(), FIRMWARE_VERSION, __DATE__, __TIME__,
+             WiFi.SSID().c_str(), ip.c_str(), WiFi.macAddress().c_str(), WiFi.RSSI(),
+             (unsigned)(ESP.getFreeHeap() / 1024), _storage.isAtivo() ? "OK" : "FALHA",
+             dataBuf, horaBuf, millis());
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "RESET_WIFI") {
+  else if (nome == "status") {
+    struct tm timeinfo;
+    bool ntpOk = getLocalTime(&timeinfo, 100) && (timeinfo.tm_year + 1900 > 1970);
+    sprintf(pMsg, "ONLINE\nWiFi: %s\nSD: %s\nNTP: %s\nHeap: %u KB\n",
+            (WiFi.status() == WL_CONNECTED) ? "OK" : "FALHA",
+            _storage.isAtivo() ? "OK" : "FALHA",
+            ntpOk ? "OK" : "FALHA",
+            (unsigned)(ESP.getFreeHeap() / 1024));
+    _net.responderUDP(pMsg);
+  }
+  else if (nome == "help") {
+    _net.responderUDP(
+      "Sistema: info status version build reason help reboot reset_wifi alive lastcmd cmdcount\n"
+      "Hardware: temp cpu ram heap flash uptime\n"
+      "Rede: net_info mac rssi ip ssid\n"
+      "Hora: time date set_fuso:N dst_on dst_off\n"
+      "LED: led_on led_off led_blink[:ms]\n"
+      "SD: sd_status sd_list sd_read:arq sd_write:arq:txt sd_del:arq sd_exists:arq sd_size:arq sd_tail:arq[:n] sd_log sd_clear_log\n");
+  }
+  else if (nome == "reset_wifi") {
     free(pMsg);
     _net.zerarConfiguracoes();
     return;
   }
-  else if (cmd == "RESTART") {
+  else if (nome == "reboot") {
     _oled.adicionarLinha("Reiniciando...");
-    _storage.gravarLog("[SISTEMA] Reinicializacao solicitada via comando RESTART.");
-    _net.responderUDP("Reiniciando Escravo...\n");
+    _storage.gravarLog("[SISTEMA] Reinicializacao solicitada via comando reboot.");
+    _net.responderUDP("Reiniciando...\n");
     delay(1000);
     free(pMsg);
     ESP.restart();
     return;
   }
-  else if (cmd == "BUILD") {
-    // __DATE__ e __TIME__ pegam automaticamente o carimbo do momento da compilação
-    sprintf(pMsg, "Compilacao Escravo:\nData: %s\nHora: %s\n", __DATE__, __TIME__);
-    _net.responderUDP(pMsg);
-  }  else if (cmd == "LED_ON") {
-    digitalWrite(LED_PIN, HIGH);
-    _net.responderUDP("LED ligado\n");
-  }
-  else if (cmd == "LED_OFF") {
-    digitalWrite(LED_PIN, LOW);
-    _net.responderUDP("LED desligado\n");
-  }
-  else if (cmd == "TEMP") {
-    sprintf(pMsg, "Temp: %.2fC", lerTemperaturaInterna());
-    _net.responderUDP(String(pMsg) + "\n");
-  }
-  else if (cmd == "CPU") {
-    sprintf(pMsg, "Modelo: %s\nRevisao: %d\nFreq: %d MHz\nHeap Livre: %u B\n",
-            ESP.getChipModel(), ESP.getChipRevision(), ESP.getCpuFreqMHz(), ESP.getFreeHeap());
+  // ─── Hardware ───
+  else if (nome == "temp") {
+    sprintf(pMsg, "Temp: %.2fC\n", lerTemperaturaInterna());
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "RAM") {
+  else if (nome == "cpu") {
+    sprintf(pMsg, "Modelo: %s\nRevisao: %d\nFreq: %d MHz\n",
+            ESP.getChipModel(), ESP.getChipRevision(), ESP.getCpuFreqMHz());
+    _net.responderUDP(pMsg);
+  }
+  else if (nome == "ram") {
     sprintf(pMsg, "Heap livre: %u\nMenor heap: %u\nMaior bloco: %u\n",
-            ESP.getFreeHeap(), ESP.getMinFreeHeap(), ESP.getMaxAllocHeap());
+            (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "FLASH") {
-    sprintf(pMsg, "Flash total: %u\nTamanho Sketch: %u\nEspaco livre: %u\n", 
-            ESP.getFlashChipSize(), ESP.getSketchSize(), ESP.getFreeSketchSpace());
+  else if (nome == "heap") {
+    sprintf(pMsg, "Heap livre: %u B\n", (unsigned)ESP.getFreeHeap());
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "UPTIME") {
+  else if (nome == "flash") {
+    sprintf(pMsg, "Flash total: %u\nTamanho Sketch: %u\nEspaco livre: %u\n",
+            (unsigned)ESP.getFlashChipSize(), (unsigned)ESP.getSketchSize(), (unsigned)ESP.getFreeSketchSpace());
+    _net.responderUDP(pMsg);
+  }
+  else if (nome == "uptime") {
     sprintf(pMsg, "Uptime: %lu ms\n", millis());
     _net.responderUDP(pMsg);
   }
-  else if (cmd == "MAC") {
+  // ─── Rede ───
+  else if (nome == "net_info") {
+    _net.responderUDP("NET:\nIP: " + WiFi.localIP().toString() + "\nETH: " + ETH.localIP().toString() +
+                      "\nRSSI: " + String(WiFi.RSSI()) + " dBm\nSSID: " + WiFi.SSID() + "\n");
+  }
+  else if (nome == "mac") {
     _net.responderUDP("MAC: " + WiFi.macAddress() + "\n");
   }
-  // ─── COMANDO: DATA LOCAL ───
-  else if (cmd == "DATE") {
+  else if (nome == "rssi") {
+    _net.responderUDP("RSSI: " + String(WiFi.RSSI()) + " dBm\n");
+  }
+  else if (nome == "ip") {
+    _net.responderUDP("IP: " + WiFi.localIP().toString() + "\nETH: " + ETH.localIP().toString() + "\n");
+  }
+  else if (nome == "ssid") {
+    _net.responderUDP("SSID: " + WiFi.SSID() + "\n");
+  }
+  // ─── Hora ───
+  else if (nome == "date") {
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 100)) {
       sprintf(pMsg, "Data:\n%02d/%02d/%04d\n", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
       _net.responderUDP(pMsg);
     } else {
-      // REGISTRO DE ERRO NO SD CARD
       _storage.gravarLog("[ERRO] Falha ao ler DATE: Relogio sem sincronizacao NTP.");
       _net.responderUDP("Erro: Sem Hora Sinc.\n");
     }
   }
-  // ─── COMANDO: RELÓGIO LOCAL ───
-  else if (cmd == "TIME") {
+  else if (nome == "time") {
     String horaStr = _time.obterApenasHora();
     if (horaStr == "00:00:00") {
-      // REGISTRO DE ERRO NO SD CARD
       _storage.gravarLog("[ERRO] Falha ao ler TIME: Relogio retornou valor nulo/padrao.");
     }
     _net.responderUDP("Hora:\n" + horaStr + "\n");
   }
-  // ─── COMANDO: MONITORAR ESPAÇO LIVRE DO CARTÃO SD ───
-  else if (cmd == "SD_INFO") {
-    if (!_storage.isAtivo()) {
-      // REGISTRO DE ERRO NO SD CARD
-      _storage.gravarLog("[ERRO] Comando SD_INFO rejeitado: Cartao SD inacessivel.");
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      uint64_t bytesTotais = SD_MMC.totalBytes();
-      uint64_t bytesUsados = SD_MMC.usedBytes();
-      uint64_t bytesLivres = bytesTotais - bytesUsados;
-
-      uint32_t totalMB = bytesTotais / (1024 * 1024);
-      uint32_t usadoMB = bytesUsados / (1024 * 1024);
-      uint32_t livreMB = bytesLivres / (1024 * 1024);
-
-      sprintf(pMsg, "--- Status SD Card ---\nTotal: %u MB\nUsado: %u MB\nLivre: %u MB\n----------------------\n", 
-              totalMB, usadoMB, livreMB);
-      _net.responderUDP(pMsg);
-    }
+  else if (nome == "set_fuso") {
+    int fusoHoras = arg.toInt();
+    long novoGmtOffset = (long)fusoHoras * 3600;
+    _time.atualizarFuso(novoGmtOffset);
+    sprintf(pMsg, "Fuso alterado para UTC %d (%ld s)\n", fusoHoras, novoGmtOffset);
+    _net.responderUDP(pMsg);
   }
-  else if (cmd == "LIST") {
-    if (!_storage.isAtivo()) {
-      // REGISTRO DE ERRO NO SD CARD
-      _storage.gravarLog("[ERRO] Comando LIST rejeitado: Cartao SD falhou ou foi removido.");
-      _net.responderUDP("Erro: SD inacessivel\n");
+  else if (nome == "dst_on" || nome == "dst_off" || nome == "dst") {
+    int dstHoras = (nome == "dst_on") ? 1 : (nome == "dst_off") ? 0 : arg.toInt();
+    _time.atualizarDST(dstHoras * 3600);
+    sprintf(pMsg, "Horario de verao: %dh\n", dstHoras);
+    _net.responderUDP(pMsg);
+  }
+  // ─── LED ───
+  else if (nome == "led_on") {
+    digitalWrite(LED_PIN, HIGH);
+    _net.responderUDP("LED ligado\n");
+  }
+  else if (nome == "led_off") {
+    digitalWrite(LED_PIN, LOW);
+    _net.responderUDP("LED desligado\n");
+  }
+  else if (nome == "led_blink") {
+    long ms = arg.toInt();
+    if (ms <= 0) ms = 3000;
+    if (ms > 10000) ms = 10000;
+    _net.responderUDP("LED piscando\n");
+    unsigned long ini = millis();
+    while (millis() - ini < (unsigned long)ms) {
+      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+      delay(200);
+    }
+    digitalWrite(LED_PIN, LOW);
+  }
+  // ─── SD ───
+  else if (nome == "sd_status") {
+    uint64_t total = SD_MMC.totalBytes();
+    uint64_t usado = SD_MMC.usedBytes();
+    sprintf(pMsg, "--- Status SD Card ---\nTotal: %u MB\nUsado: %u MB\nLivre: %u MB\n----------------------\n",
+            (unsigned)(total / (1024 * 1024)), (unsigned)(usado / (1024 * 1024)),
+            (unsigned)((total - usado) / (1024 * 1024)));
+    _net.responderUDP(pMsg);
+  }
+  else if (nome == "sd_list") {
+    File raiz = SD_MMC.open("/");
+    File arquivo = raiz.openNextFile();
+    if (!arquivo) {
+      _net.responderUDP("Diretorio vazio\n");
     } else {
-      File raiz = SD_MMC.open("/");
-      File arquivo = raiz.openNextFile();
-      if (!arquivo) {
-        _net.responderUDP("Diretorio vazio\n");
-      } else {
-        _net.responderUDP("--- Arquivos SD ---\n");
-        while (arquivo) {
-          _net.responderUDP(String(arquivo.name()) + " (" + String(arquivo.size()) + " B)\n");
-          arquivo = raiz.openNextFile();
-        }
-        _net.responderUDP("-------------------\n");
+      _net.responderUDP("--- Arquivos SD ---\n");
+      while (arquivo) {
+        _net.responderUDP(String(arquivo.name()) + " (" + String(arquivo.size()) + " B)\n");
+        arquivo = raiz.openNextFile();
       }
-      raiz.close();
+      _net.responderUDP("-------------------\n");
     }
+    raiz.close();
   }
-  else if (cmd.startsWith("READ:")) {
-    if (!_storage.isAtivo()) {
-      // REGISTRO DE ERRO NO SD CARD
-      _storage.gravarLog("[ERRO] Comando READ falhou: Slot de memoria inativo.");
-      _net.responderUDP("Erro: SD inacessivel\n");
-    } else {
-      String caminho = cmd.substring(5); caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (!SD_MMC.exists(caminho)) {
-        // REGISTRO DE ERRO NO SD CARD
-        _storage.gravarLog("[ERRO] Tentativa de leitura falhou. Arquivo inexistente: " + caminho);
-        _net.responderUDP("Arquivo nao existe\n");
+  else if (nome == "sd_read" || nome == "sd_log" || nome == "sd_tail") {
+    String caminho;
+    int linhasDesejadas = 0;
+    if (nome == "sd_log") {
+      caminho = "/log.txt";
+      linhasDesejadas = arg.toInt();
+      if (linhasDesejadas <= 0) linhasDesejadas = 10;
+    } else if (nome == "sd_tail") {
+      linhasDesejadas = 10;
+      int i = arg.indexOf(':');
+      if (i != -1) {
+        caminho = normalizarCaminho(arg.substring(0, i));
+        linhasDesejadas = arg.substring(i + 1).toInt();
+        if (linhasDesejadas <= 0) linhasDesejadas = 10;
       } else {
-        File arquivo = SD_MMC.open(caminho, FILE_READ);
-        if (!arquivo || arquivo.isDirectory()) {
-          // REGISTRO DE ERRO NO SD CARD
-          _storage.gravarLog("[ERRO] Falha critica do sistema de arquivos ao abrir para leitura: " + caminho);
-          _net.responderUDP("Falha ao abrir arquivo\n");
+        caminho = normalizarCaminho(arg);
+      }
+    } else {
+      caminho = normalizarCaminho(arg);
+    }
+
+    if (!SD_MMC.exists(caminho)) {
+      _net.responderUDP("Arquivo nao existe\n");
+    } else {
+      File arquivo = SD_MMC.open(caminho, FILE_READ);
+      if (!arquivo || arquivo.isDirectory()) {
+        _storage.gravarLog("[ERRO] Falha ao abrir para leitura: " + caminho);
+        _net.responderUDP("Falha ao abrir arquivo\n");
+      } else {
+        if (linhasDesejadas > 0) {
+          int total = 0;
+          while (arquivo.available()) { arquivo.readStringUntil('\n'); total++; }
+          int inicial = total - linhasDesejadas;
+          if (inicial < 0) inicial = 0;
+          arquivo.seek(0);
+          for (int i = 0; i < inicial && arquivo.available(); i++) arquivo.readStringUntil('\n');
+          _net.responderUDP("--- TAIL: " + caminho + " ---\n");
+          while (arquivo.available()) _net.responderUDP(arquivo.readStringUntil('\n') + "\n");
+          _net.responderUDP("--- Fim do Bloco ---\n");
         } else {
           _net.responderUDP("--- Lendo: " + caminho + " ---\n");
-          
           uint32_t tamanhoTotal = arquivo.size();
           uint32_t bytesLidos = 0;
           int ultimaPorcentagem = -1;
-
           _oled.configurarProgresso(true, 0);
-
           while (arquivo.available()) {
             String linha = arquivo.readStringUntil('\n') + "\n";
             bytesLidos += linha.length();
             _net.responderUDP(linha);
-            
-            int porcentagemAtual = (tamanhoTotal > 0) ? (bytesLidos * 100 / tamanhoTotal) : 100;
-            
-            if (porcentagemAtual != ultimaPorcentagem) {
-              ultimaPorcentagem = porcentagemAtual;
-              _oled.configurarProgresso(true, porcentagemAtual);
+            int pct = (tamanhoTotal > 0) ? (bytesLidos * 100 / tamanhoTotal) : 100;
+            if (pct != ultimaPorcentagem) {
+              ultimaPorcentagem = pct;
+              _oled.configurarProgresso(true, pct);
             }
           }
-          
           _net.responderUDP("--- Fim do Arquivo ---\n");
-          arquivo.close();
           _oled.configurarProgresso(false, 0);
         }
+        arquivo.close();
       }
     }
   }
-  else if (cmd == "STATUS") {
-    // Verifica o status do Wi-Fi
-    String statusWifi = (WiFi.status() == WL_CONNECTED) ? "OK" : "FALHA";
-    
-    // Verifica o status do SD Card
-    String statusSD = _storage.isAtivo() ? "OK" : "FALHA";
-    
-    // Verifica o status do NTP checando se o ano não é o padrão Unix inicial (1970)
-    struct tm timeinfo;
-    String statusNTP = "FALHA";
-    if (getLocalTime(&timeinfo, 100)) {
-      if (timeinfo.tm_year + 1900 > 1970) {
-        statusNTP = "OK";
-      }
-    }
-    
-    // Obtém o Heap Livre em Kilobytes
-    uint32_t heapKB = ESP.getFreeHeap() / 1024;
-
-    sprintf(pMsg, "ONLINE\nWiFi: %s\nSD: %s\nNTP: %s\nHeap: %u KB\n", 
-            statusWifi.c_str(), statusSD.c_str(), statusNTP.c_str(), heapKB);
-    _net.responderUDP(pMsg);
-  }
-  else if (cmd.startsWith("WRITE:")) {
-    if (!_storage.isAtivo()) {
-      _storage.gravarLog("[ERRO] Comando WRITE rejeitado: Cartao SD inacessivel.");
-      _net.responderUDP("Erro: SD inacessivel\n");
+  else if (nome == "sd_write") {
+    arg.trim();
+    // Aceita "arquivo:conteudo" (padrao) ou "arquivo=conteudo" (formato antigo)
+    int ic = arg.indexOf(':');
+    int ie = arg.indexOf('=');
+    int i = (ic == -1) ? ie : (ie == -1 ? ic : min(ic, ie));
+    if (i == -1) {
+      _net.responderUDP("Erro: Formato invalido. Use sd_write:/arquivo.txt:conteudo\n");
     } else {
-      // Remove o prefixo "WRITE:"
-      String dadosGerais = cmd.substring(6); 
-      dadosGerais.trim();
-      
-      // Encontra o separador ":" entre o caminho do arquivo e o conteúdo
-      int indiceSeparador = dadosGerais.indexOf(':');
-      
-      if (indiceSeparador == -1) {
-        _net.responderUDP("Erro: Formato invalido. Use WRITE:/arquivo.txt:conteudo\n");
+      String caminho = normalizarCaminho(arg.substring(0, i));
+      String conteudo = arg.substring(i + 1);
+      File arquivo = SD_MMC.open(caminho, FILE_WRITE);
+      if (!arquivo) {
+        _storage.gravarLog("[ERRO] Falha ao abrir para escrita: " + caminho);
+        _net.responderUDP("Erro ao abrir arquivo\n");
       } else {
-        String caminho = dadosGerais.substring(0, indiceSeparador);
-        String conteudo = dadosGerais.substring(indiceSeparador + 1);
-        caminho.trim();
-        
-        if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-        // Abre o arquivo em modo FILE_WRITE (sobrescreve se o arquivo já existir)
-        File arquivo = SD_MMC.open(caminho, FILE_WRITE);
-        if (!arquivo) {
-          _storage.gravarLog("[ERRO] Falha critica ao criar/abrir arquivo para escrita: " + caminho);
-          _net.responderUDP("Erro ao abrir arquivo\n");
-        } else {
-          arquivo.print(conteudo);
-          arquivo.close();
-          _storage.gravarLog("[SD] Arquivo gravado com sucesso: " + caminho);
-          _net.responderUDP("Ok\n");
-        }
+        arquivo.print(conteudo);
+        arquivo.close();
+        _storage.gravarLog("[SD] Arquivo gravado com sucesso: " + caminho);
+        _net.responderUDP("Ok\n");
       }
     }
   }
-  else if (cmd.startsWith("EXISTS:")) {
-    if (!_storage.isAtivo()) {
-      _net.responderUDP("Erro: SD inacessivel\n");
+  else if (nome == "sd_del") {
+    String caminho = normalizarCaminho(arg);
+    if (!SD_MMC.exists(caminho)) {
+      _net.responderUDP("Arquivo nao existe\n");
+    } else if (SD_MMC.remove(caminho)) {
+      _storage.gravarLog("[SD] Arquivo excluido com sucesso: " + caminho);
+      _net.responderUDP("Ok\n");
     } else {
-      String caminho = cmd.substring(7); 
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (SD_MMC.exists(caminho)) {
-        _net.responderUDP("Existe\n");
-      } else {
-        _net.responderUDP("Nao existe\n");
-      }
+      _storage.gravarLog("[ERRO] Falha ao excluir: " + caminho);
+      _net.responderUDP("Erro ao deletar arquivo\n");
     }
   }
-  else if (cmd.startsWith("SIZE:")) {
-    if (!_storage.isAtivo()) {
-      _net.responderUDP("Erro: SD inacessivel\n");
+  else if (nome == "sd_exists") {
+    _net.responderUDP(SD_MMC.exists(normalizarCaminho(arg)) ? "Existe\n" : "Nao existe\n");
+  }
+  else if (nome == "sd_size") {
+    String caminho = normalizarCaminho(arg);
+    if (!SD_MMC.exists(caminho)) {
+      _net.responderUDP("Arquivo nao existe\n");
     } else {
-      String caminho = cmd.substring(5); 
-      caminho.trim();
-      if (!caminho.startsWith("/")) caminho = "/" + caminho;
-
-      if (!SD_MMC.exists(caminho)) {
-        _net.responderUDP("Arquivo nao existe\n");
+      File arquivo = SD_MMC.open(caminho, FILE_READ);
+      if (!arquivo || arquivo.isDirectory()) {
+        _net.responderUDP("Falha ao abrir arquivo\n");
       } else {
-        File arquivo = SD_MMC.open(caminho, FILE_READ);
-        if (!arquivo || arquivo.isDirectory()) {
-          _net.responderUDP("Falha ao abrir arquivo\n");
-        } else {
-          uint32_t tamanhoBytes = arquivo.size();
-          arquivo.close();
-          sprintf(pMsg, "Tamanho: %u B\n", tamanhoBytes);
-          _net.responderUDP(pMsg);
-        }
+        sprintf(pMsg, "Tamanho: %u B\n", (unsigned)arquivo.size());
+        arquivo.close();
+        _net.responderUDP(pMsg);
       }
     }
   }
-  else if (cmd == "NET_INFO") {
-      _net.responderUDP("NET:\nIP: " + WiFi.localIP().toString() + "\nRSSI: " + String(WiFi.RSSI()) + " dBm\nSSID: " + WiFi.SSID()+"\n");
-  }
-  // Exemplo de envio: "SET_TZ:-3" (Para UTC-3) ou "SET_TZ:1" (Para UTC+1)
-  else if (cmd.startsWith("SET_TZ:")) {
-    String valorStr = cmd.substring(7); 
-    valorStr.trim();
-    int fusoHoras = valorStr.toInt();
-    
-    // Converte horas para segundos (ex: -3 * 3600 = -10800)
-    long novoGmtOffset = (long)fusoHoras * 3600;
-    
-    _time.atualizarFuso(novoGmtOffset);
-    
-    sprintf(pMsg, "Fuso alterado para UTC %d (%ld s)\n", fusoHoras, novoGmtOffset);
-    _net.responderUDP(pMsg);
-  }
-  
-  // Exemplo de envio: "SET_DST:1" (Ativar +1h) ou "SET_DST:0" (Desativar)
-  else if (cmd.startsWith("SET_DST:")) {
-    String valorStr = cmd.substring(8); 
-    valorStr.trim();
-    int dstHoras = valorStr.toInt();
-    
-    // Converte horas para segundos (ex: 1 * 3600 = 3600)
-    int novoDaylightOffset = dstHoras * 3600;
-    
-    _time.atualizarDST(novoDaylightOffset);
-    
-    sprintf(pMsg, "Horario de verao: %dh (%d s)\n", dstHoras, novoDaylightOffset);
-    _net.responderUDP(pMsg);
+  else if (nome == "sd_clear_log") {
+    if (SD_MMC.exists("/log.txt")) SD_MMC.remove("/log.txt");
+    _net.responderUDP("Log limpo\n");
   }
   else {
-    // REGISTRO DE ERRO NO SD CARD (Comando fantasma ou desconhecido recebido por UDP)
     _storage.gravarLog("[ERRO] Comando recebido invalido ou corrompido: " + cmd);
     _net.responderUDP("Comando Invalido\n");
   }
