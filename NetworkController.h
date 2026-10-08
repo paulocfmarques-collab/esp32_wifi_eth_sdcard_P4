@@ -9,11 +9,16 @@
 #include <esp_netif.h>
 #include "OledDisplay.h"
 #include "StorageManager.h"
+#include "NetworkMonitor.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 #define NUM_REDES 5
 
 class NetworkController {
 private:
+  QueueHandle_t _networkEvents = nullptr;
+  NetworkMonitor _monitor;
   WebServer _server;
   WiFiUDP _udp;
   Preferences _prefs;
@@ -23,6 +28,7 @@ private:
   static NetworkController* _instance;
   volatile bool _dadosProntosParaSalvar;
   bool _rotasOk;
+  uint32_t _restartAt = 0;
   String _tmpS[NUM_REDES];
   String _tmpP[NUM_REDES];
 
@@ -53,7 +59,10 @@ public:
   
   WiFiUDP& getUdpDriver() { return _udp; }
   void responderUDP(const String& msg);
+  const NetworkMonitor& monitor() const { return _monitor; }
   void zerarConfiguracoes();
+  String listarSSIDs();
+  bool adicionarRede(const String& ssid, const String& senha, String& erro);
 };
 
 #endif

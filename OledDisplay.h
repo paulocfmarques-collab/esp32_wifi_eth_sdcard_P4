@@ -5,11 +5,17 @@
 #include "DeviceConfig.h"
 
 class TimeManager;
+class NetworkController;
+class StorageManager;
 
 class OledDisplay {
 private:
   Adafruit_SSD1306 _display;
   bool _inicializado;
+  uint8_t _pagina = 0;
+  bool _autoPaginas = true;
+  uint32_t _ultimaPagina = 0, _ultimoPainel = 0, _consoleAte = 0;
+
   
   // Reduzido para 5 linhas móveis para sobrar espaço para a barra de progresso na base
   static const int MAX_LINHAS_TERMINAL = 5; 
@@ -26,6 +32,11 @@ private:
 public:
   OledDisplay();
   void inicializar();
+  void selecionarPagina(uint8_t pagina);
+  void avancarPagina();
+  void paginasAutomaticas();
+  void atualizarPainel(TimeManager& hora, NetworkController& rede, StorageManager& sd);
+
   void adicionarLinha(const String& novoTexto);
   void atualizarRelogioSuperior(TimeManager& timeRef);
   

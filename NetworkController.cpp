@@ -1,4 +1,6 @@
 #include "NetworkController.h"
+#include "PortalUi.h"
+#include <ctype.h>
 
 NetworkController* NetworkController::_instance = nullptr;
 bool NetworkController::ethConectado = false;
@@ -10,23 +12,15 @@ NetworkController::NetworkController(OledDisplay& oledRef, StorageManager& stora
 
 void NetworkController::inicializar()
  {
+  _networkEvents = xQueueCreate(16, sizeof(arduino_event_id_t));
   WiFi.onEvent(onNetworkEvent);
 }
 
 void NetworkController::onNetworkEvent(arduino_event_id_t event, arduino_event_info_t info) {
   if (!_instance) return;
-  switch (event) 
-  {
-    case ARDUINO_EVENT_ETH_START: _instance->_oled.adicionarLinha("ETH Inicializada"); ETH.setHostname("esp32-p4-node"); break;
-    case ARDUINO_EVENT_ETH_CONNECTED: _instance->_oled.adicionarLinha("Cabo ETH Conectado"); break;
-    case ARDUINO_EVENT_ETH_GOT_IP:
-      _instance->_oled.adicionarLinha("IP ETH Obtido:");
-      _instance->_oled.adicionarLinha(ETH.localIP().toString());
-      ethConectado = true;
-      break;
-    case ARDUINO_EVENT_ETH_DISCONNECTED: _instance->_oled.adicionarLinha("ETH Desconectada"); ethConectado = false; break;
-    default: break;
-  }
+  if (event == ARDUINO_EVENT_ETH_START) ETH.setHostname("esp32-p4-node");
+  // I2C and String history belong to the main loop, never to the event task.
+  if (_instance->_networkEvents) xQueueSend(_instance->_networkEvents, &event, 0);
 }
 
 static String esc(const String& s) {
@@ -37,16 +31,11 @@ static String esc(const String& s) {
     else if (c == '<') o += "&lt;";
     else if (c == '>') o += "&gt;";
     else if (c == '"') o += "&quot;";
+    else if (c == '\'') o += "&#39;";
     else o += c;
   }
   return o;
 }
-
-static const char CSS_P4[] PROGMEM =
-  "<style>body{font-family:Arial;margin:20px;background:#f4f4f9;text-align:center;}"
-  ".box{background:white;max-width:420px;margin:auto;padding:20px;border-radius:8px;box-shadow:0 4px 8px rgba(0,0,0,0.1);text-align:left;}"
-  "input{width:100%;box-sizing:border-box;margin:3px 0;padding:6px;}"
-  "td{padding:3px 6px;}a{color:#06c;}</style>";
 
 void NetworkController::carregarRedes(String ssids[NUM_REDES], String senhas[NUM_REDES], int& idx) {
   _prefs.begin("wifi", false);
@@ -131,52 +120,83 @@ void NetworkController::iniciarPortal()
 {
   WiFi.mode(WIFI_AP);
   WiFi.softAP("ESP32_P4_CONFIG");
+  _udp.begin(UDP_PORTA);
   _oled.adicionarLinha("Portal Ativo!");
   _oled.adicionarLinha("IP: 192.168.4.1");
   configurarRotas();
 }
 
-void NetworkController::handleWifi() {
-  String ssids[NUM_REDES], senhas[NUM_REDES];
-  int idx;
-  carregarRedes(ssids, senhas, idx);
-
-  String h = F("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>WiFi - ESP32-P4</title>");
-  h += FPSTR(CSS_P4);
-  h += F("</head><body><div class='box'><h2>Configuração WiFi - P4</h2><form action='/salvar' method='POST'>");
-  for (int i = 0; i < NUM_REDES; i++) {
-    h += "<b>Rede " + String(i + 1) + "</b><input type='text' name='ssid" + String(i) + "' placeholder='SSID' value='" + esc(ssids[i]) + "'>";
-    h += "<input type='password' name='senha" + String(i) + "' placeholder='" + String(ssids[i] != "" ? "(manter senha atual)" : "Senha") + "'>";
-  }
-  h += F("<br><input type='submit' value='Salvar e Reiniciar'></form><p><a href='/info'>Informações</a></p></div></body></html>");
-  _server.send(200, "text/html", h);
+static String statusBadge(bool ok, const char* yes, const char* no) {
+ return String("<span class='badge ") + (ok ? "ok" : "warn") + "'>" + (ok ? yes : no) + "</span>";
 }
-
+static String infoRow(const char* title, const String& value) {
+ return "<div class='row'><span>" + String(title) + "</span><strong>" + esc(value) + "</strong></div>";
+}
+static String metric(const char* title, const String& value, const char* hint) {
+ return "<article class='card'><div class='label'>" + String(title) + "</div><div class='value'>" + esc(value) + "</div><small>" + String(hint) + "</small></article>";
+}
+void NetworkController::handleWifi() {
+ String ssids[NUM_REDES], senhas[NUM_REDES]; int idx;
+ carregarRedes(ssids, senhas, idx);
+ String h = portalStart("Redes Wi-Fi", true);
+ h += F("<div class='top'><div><div class='eyebrow'>Conectividade</div><h1>Suas redes Wi-Fi</h1><p class='muted'>Até cinco conexões salvas para o seu dispositivo.</p></div><a class='button secondary' href='/info'>Ver informações</a></div>");
+ h += F("<div class='notice'>Deixe a senha vazia para manter a senha de uma rede com o mesmo SSID. Para remover uma rede, apague o nome. Marque <b>Rede aberta</b> para salvar sem senha.</div><form action='/salvar' method='post' id='networks'><div class='grid'>");
+ for(int i=0;i<NUM_REDES;i++) {
+  String n=String(i); bool active=WiFi.status()==WL_CONNECTED && ssids[i].length() && ssids[i]==WiFi.SSID();
+  h += "<article class='card'><div class='net-title'><div><div class='slot'>PERFIL 0" + String(i+1) + "</div><h2>Rede " + String(i+1) + "</h2></div>";
+  h += active ? statusBadge(true,"Conectada","") : ssids[i].length() ? String("<span class='badge'>Salva</span>") : String("<span class='badge'>Disponível</span>");
+  h += "</div><label class='field' for='ssid"+n+"'>Nome da rede (SSID)</label><input id='ssid"+n+"' name='ssid"+n+"' type='text' maxlength='32' autocomplete='off' placeholder='Ex.: Minha rede' value='"+esc(ssids[i])+"'>";
+  h += "<label class='field' for='senha"+n+"'>Senha</label><div class='password'><input id='senha"+n+"' name='senha"+n+"' type='password' maxlength='64' autocomplete='new-password' placeholder='"+String(ssids[i].length()?"Vazia mantém a senha atual":"8 a 63 caracteres ou chave hexadecimal")+"'><button type='button' aria-controls='senha"+n+"' aria-pressed='false' onclick='togglePassword(this)'>Mostrar</button></div>";
+  h += "<label class='check'><input type='checkbox' name='aberto"+n+"' value='1' onchange='toggleOpen(this)'"+String(ssids[i].length() && senhas[i].isEmpty()?" checked":"")+">Rede aberta (sem senha)</label>";
+  h += "<p class='hint'>"+String(i==idx?"Última rede utilizada pelo dispositivo.":"A senha salva nunca é enviada para esta página.")+"</p></article>";
+ }
+ h += F("</div><div class='actions'><button type='submit' id='save'>Salvar redes e reiniciar</button><p>As configurações são verificadas antes do reinício.</p></div><p id='form-status' role='status' class='muted'></p></form>");
+ h += F(R"JS(<script>
+function togglePassword(b){const i=document.getElementById(b.getAttribute('aria-controls'));const show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'Ocultar':'Mostrar';b.setAttribute('aria-pressed',String(show))}
+function toggleOpen(c){const i=c.closest('article').querySelector('input[name^="senha"]');i.disabled=c.checked;if(c.checked)i.value=''}
+document.querySelectorAll('input[name^="aberto"]').forEach(toggleOpen);
+document.getElementById('networks').addEventListener('submit',function(e){let error='';this.querySelectorAll('input[name^="ssid"]').forEach(i=>{if(new TextEncoder().encode(i.value.trim()).length>32)error='O nome de cada rede deve ter até 32 bytes.'});if(error){e.preventDefault();document.getElementById('form-status').textContent=error;return}document.getElementById('save').disabled=true;document.getElementById('form-status').textContent='Gravando e verificando suas redes…'});
+</script>)JS");
+ h += portalEnd(); _server.send(200,"text/html; charset=utf-8",h);
+}
 void NetworkController::handleInfo() {
-  String ssids[NUM_REDES], senhas[NUM_REDES];
-  int idx;
-  carregarRedes(ssids, senhas, idx);
-
-  uint32_t seg = millis() / 1000;
-  String h = F("<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='10'><title>Info - ESP32-P4</title>");
-  h += FPSTR(CSS_P4);
-  h += F("</head><body><div class='box'><h2>ESP32-P4 - Informações</h2><table>");
-  h += "<tr><td>Chip</td><td>" + String(ESP.getChipModel()) + " rev " + String(ESP.getChipRevision()) + "</td></tr>";
-  h += "<tr><td>SSID</td><td>" + esc(WiFi.SSID()) + "</td></tr>";
-  h += "<tr><td>IP Wi-Fi</td><td>" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("-")) + "</td></tr>";
-  h += "<tr><td>IP ETH</td><td>" + (ethConectado ? ETH.localIP().toString() : String("-")) + "</td></tr>";
-  h += "<tr><td>RSSI</td><td>" + String(WiFi.RSSI()) + " dBm</td></tr>";
-  h += "<tr><td>MAC</td><td>" + WiFi.macAddress() + "</td></tr>";
-  h += "<tr><td>Heap livre</td><td>" + String(ESP.getFreeHeap() / 1024) + " KB</td></tr>";
-  h += "<tr><td>SD Card</td><td>" + String(_storage.isAtivo() ? "OK" : "FALHA") + "</td></tr>";
-  h += "<tr><td>Uptime</td><td>" + String(seg / 3600) + "h " + String((seg / 60) % 60) + "m " + String(seg % 60) + "s</td></tr>";
-  h += F("</table><h3>Redes salvas</h3><ol>");
-  for (int i = 0; i < NUM_REDES; i++) {
-    if (ssids[i] == "") continue;
-    h += "<li>" + esc(ssids[i]) + (i == idx ? " (última usada)" : "") + "</li>";
-  }
-  h += F("</ol><p><a href='/wifi'>Configurar redes</a></p></div></body></html>");
-  _server.send(200, "text/html", h);
+ String ssids[NUM_REDES], senhas[NUM_REDES]; int idx;
+ carregarRedes(ssids,senhas,idx);
+ bool wifi=WiFi.status()==WL_CONNECTED; uint32_t seg=millis()/1000;
+ String uptime=String(seg/3600)+"h "+String((seg/60)%60)+"m";
+ String h=portalStart("Informações",false,true);
+ h += F("<div class='top'><div><div class='eyebrow'>Visão geral</div><h1>Seu dispositivo, ao vivo.</h1><p class='muted'>Conexões, desempenho e histórico em um só lugar.</p></div><a class='button' href='/wifi'>Configurar redes</a></div><div class='grid metrics'>");
+ h += metric("Wi-Fi",wifi?String("Conectado"):String("Offline"),"Rede sem fio");
+ h += metric("Ethernet",ethConectado?String("Conectado"):String("Offline"),"Conexão por cabo");
+ h += metric("Memória livre",String(ESP.getFreeHeap()/1024)+" KB","Heap disponível");
+ h += metric("Tempo ligado",uptime,"Desde a inicialização"); h += F("</div><div class='grid'>");
+ for(int i=0;i<2;i++) {
+  bool online=i==0?wifi:ethConectado;const auto& l=_monitor.links[i];
+  h += String("<article class='card'><div class='net-title'><h2>")+(i==0?"Wi-Fi":"Ethernet")+"</h2>"+statusBadge(online,"Online","Offline")+"</div>";
+  if(i==0) h+=infoRow("Rede",wifi?WiFi.SSID():WiFi.getMode()==WIFI_AP?String("AP ESP32_P4_CONFIG"):String("Não conectada"));
+  h += infoRow("Endereço IP",online?(i==0?WiFi.localIP():ETH.localIP()).toString():String("—"));
+  h += infoRow("Gateway",online?(i==0?WiFi.gatewayIP():ETH.gatewayIP()).toString():String("—"));
+  if(i==0) {h+=infoRow("Sinal",wifi?String(WiFi.RSSI())+" dBm":String("—"));h+=infoRow("MAC",WiFi.macAddress());}
+  String ping=!online?String("Sem rede"):!l.result?String("Aguardando medição"):l.replied?String(l.rtt)+" ms":String("Sem resposta");
+  h += infoRow("Resposta ao gateway",ping);
+  if(l.received) h+=infoRow("RTT mín. / média / máx.",String(l.minimum)+" / "+String((unsigned long)(l.totalRtt/l.received))+" / "+String(l.maximum)+" ms");
+  if(l.result) h+=infoRow("Última medição","Há "+String(uint32_t(millis()-l.measuredAt)/1000)+" s");
+  h += infoRow("Quedas de conexão",String(l.drops));h+=infoRow("Tempo offline",String((unsigned long)(l.offlineMs/1000))+" s");
+  h+=infoRow("Pings sem resposta",String(l.lost)+" de "+String(l.sent));h+="</article>";
+ }
+ h+=F("<article class='card'><h2>Dispositivo</h2>");
+ h+=infoRow("Processador",String(ESP.getChipModel())+" · rev "+String(ESP.getChipRevision()));
+ h+=infoRow("Frequência",String(ESP.getCpuFreqMHz())+" MHz");h+=infoRow("Menor heap livre",String(ESP.getMinFreeHeap()/1024)+" KB");
+ h+=infoRow("Cartão SD",_storage.isAtivo()?String("Disponível"):String("Indisponível"));
+ h+=infoRow("Console UDP",String(UDP_PORTA));h+="</article><article class='card'><h2>Redes salvas</h2>";
+ bool any=false;
+ for(int i=0;i<NUM_REDES;i++) if(ssids[i].length()) {any=true;h+=infoRow(("Perfil "+String(i+1)).c_str(),ssids[i]+(i==idx?" · última utilizada":""));}
+ if(!any)h+=F("<p class='muted'>Nenhuma rede salva. Configure sua primeira conexão.</p>");
+ h+=F("</article><article class='card full'><h2>Histórico de conexão</h2>");
+ bool events=false;for(const auto& e:_monitor.events)if(e.length()){events=true;h+="<div class='event'>"+esc(e)+"</div>";}
+ if(!events)h+=F("<p class='muted'>Aguardando eventos de rede.</p>");
+ h+=F("<p class='hint'>Tempos desde o boot. O histórico reinicia com a placa. Um ping sem resposta pode indicar bloqueio de ICMP.</p></article></div><p class='hint section'>Atualização automática a cada 10 segundos.</p>");
+ h+=portalEnd();_server.send(200,"text/html; charset=utf-8",h);
 }
 
 void NetworkController::handleRoot() {
@@ -185,37 +205,75 @@ void NetworkController::handleRoot() {
 }
 
 void NetworkController::handleSave() {
-  String ssids[NUM_REDES], senhas[NUM_REDES];
-  int idx;
-  carregarRedes(ssids, senhas, idx);
-
-  for (int i = 0; i < NUM_REDES; i++) {
-    String novo = _server.arg("ssid" + String(i));
-    String senha = _server.arg("senha" + String(i));
-    novo.trim();
-    if (novo == "") { _tmpS[i] = ""; _tmpP[i] = ""; continue; }
-    _tmpS[i] = novo;
-    _tmpP[i] = (senha == "" && novo == ssids[i]) ? senhas[i] : senha;
+ auto message=[&](int code,const char* title,const String& text,bool success){
+  String h=portalStart(title,true);
+  h+=String("<div class='card message ")+(success?"success":"error")+"'><div class='eyebrow'>Configuração de rede</div><h1>"+String(title)+"</h1><p class='muted'>"+esc(text)+"</p>";
+  h+=success?String("<p>Após o reinício, acesse o novo IP do dispositivo. Se nenhuma rede conectar, use o AP ESP32_P4_CONFIG.</p>"):String("<a class='button' href='/wifi'>Voltar às redes</a>");
+  h+="</div>"+portalEnd();_server.send(code,"text/html; charset=utf-8",h);
+ };
+ if(_dadosProntosParaSalvar){message(409,"Reinício em andamento","Aguarde o dispositivo reiniciar.",false);return;}
+ String oldS[NUM_REDES],oldP[NUM_REDES];int oldIdx;
+ carregarRedes(oldS,oldP,oldIdx);
+ for(int i=0;i<NUM_REDES;i++) {
+  String n=String(i);
+  bool open=_server.hasArg("aberto"+n);
+  if(!_server.hasArg("ssid"+n) || (!open && !_server.hasArg("senha"+n))){message(400,"Formulário incompleto","Nenhuma configuração foi alterada. Envie todos os cinco perfis.",false);return;}
+  String ssid=_server.arg("ssid"+n),pass=_server.arg("senha"+n);ssid.trim();
+  if(ssid.length()>32){message(400,"Nome de rede inválido","O SSID deve ter até 32 bytes.",false);return;}
+  if(ssid.isEmpty()){_tmpS[i]="";_tmpP[i]="";continue;}
+  if(open)pass="";else if(pass.isEmpty() && ssid==oldS[i])pass=oldP[i];
+  bool hex=pass.length()==64;
+  if(hex)for(size_t j=0;j<pass.length();j++)if(!isxdigit((unsigned char)pass[j])){hex=false;break;}
+  if(!pass.isEmpty() && !(pass.length()>=8 && pass.length()<=63) && !hex){message(400,"Senha inválida","Use de 8 a 63 bytes ou uma chave hexadecimal de 64 caracteres.",false);return;}
+  if(pass.isEmpty() && !open && (ssid!=oldS[i] || !oldP[i].isEmpty())){message(400,"Informe a senha","Para uma rede sem senha, marque Rede aberta.",false);return;}
+  _tmpS[i]=ssid;_tmpP[i]=pass;
+ }
+ if(!_prefs.begin("wifi",false)){message(500,"Falha ao salvar","Não foi possível abrir as configurações. Tente novamente.",false);return;}
+ bool ok=true;
+ for(int i=0;i<NUM_REDES;i++) {
+  String sk="s"+String(i),pk="p"+String(i);
+  _prefs.putString(sk.c_str(),_tmpS[i]);_prefs.putString(pk.c_str(),_tmpP[i]);
+  ok=(_prefs.isKey(sk.c_str()) && _prefs.isKey(pk.c_str()) && _prefs.getString(sk.c_str(),"!missing!")==_tmpS[i] && _prefs.getString(pk.c_str(),"!missing!")==_tmpP[i]) && ok;
+ }
+ _prefs.putInt("idx",-1);ok=(_prefs.getInt("idx",-2)==-1) && ok;
+ if(!ok) {
+  bool restored=true;
+  for(int i=0;i<NUM_REDES;i++) {
+   String sk="s"+String(i),pk="p"+String(i);
+   _prefs.putString(sk.c_str(),oldS[i]);_prefs.putString(pk.c_str(),oldP[i]);
+   restored=(_prefs.isKey(sk.c_str()) && _prefs.isKey(pk.c_str()) && _prefs.getString(sk.c_str(),"!missing!")==oldS[i] && _prefs.getString(pk.c_str(),"!missing!")==oldP[i]) && restored;
   }
-  _server.send(200, "text/html", "<meta charset='UTF-8'><h2>Configuração salva! Reiniciando...</h2>");
-  _dadosProntosParaSalvar = true;
+  _prefs.putInt("idx",oldIdx);restored=(_prefs.getInt("idx",-2)==oldIdx) && restored;_prefs.end();
+  message(500,"Falha na gravação",restored?String("As configurações anteriores foram restauradas. Tente novamente."):String("Não foi possível restaurar todos os dados. Revise os perfis antes de reiniciar."),false);return;
+ }
+ _prefs.end();
+ message(200,"Redes salvas!","Os cinco perfis foram gravados e verificados. O dispositivo vai reiniciar em instantes.",true);
+ _restartAt=millis()+1500;_dadosProntosParaSalvar=true;
 }
 
 void NetworkController::processarPortalERedes() 
 {
-  _server.handleClient();
-  if (_dadosProntosParaSalvar) {
-    _dadosProntosParaSalvar = false;
-    _prefs.begin("wifi", false);
-    for (int i = 0; i < NUM_REDES; i++) {
-      _prefs.putString(("s" + String(i)).c_str(), _tmpS[i]);
-      _prefs.putString(("p" + String(i)).c_str(), _tmpP[i]);
+  arduino_event_id_t event;
+  while (_networkEvents && xQueueReceive(_networkEvents, &event, 0) == pdTRUE) {
+    switch (event) {
+      case ARDUINO_EVENT_ETH_START: _oled.adicionarLinha("ETH inicializada"); break;
+      case ARDUINO_EVENT_ETH_CONNECTED: _oled.adicionarLinha("Cabo ETH conectado"); break;
+      case ARDUINO_EVENT_ETH_GOT_IP:
+        ethConectado = true; _udp.begin(UDP_PORTA);
+        _oled.adicionarLinha("ETH: " + ETH.localIP().toString()); break;
+      case ARDUINO_EVENT_ETH_DISCONNECTED:
+      case ARDUINO_EVENT_ETH_STOP:
+      case ARDUINO_EVENT_ETH_LOST_IP:
+        ethConectado = false; _oled.adicionarLinha("ETH sem rede"); break;
+      default: break;
     }
-    _prefs.putInt("idx", -1);
-    _prefs.end();
-    delay(1000);
-    ESP.restart();
   }
+  // Poll actual status as well: a full event queue must not leave stale telemetry.
+  ethConectado = ETH.linkUp() && ETH.localIP() != IPAddress(0,0,0,0);
+  configurarPrioridadeDeRede();
+  _monitor.update(WiFi.status() == WL_CONNECTED, ethConectado);
+  _server.handleClient();
+  if (_dadosProntosParaSalvar && int32_t(millis()-_restartAt)>=0) ESP.restart();
 }
 
 void NetworkController::configurarPrioridadeDeRede() 
@@ -253,5 +311,36 @@ void NetworkController::ativarEthernetFisica()
 {
   _oled.adicionarLinha("Iniciando ETH...");
   ETH.begin(ETH_PHY_TYPE, ETH_PHY_ADDR, ETH_PHY_MDC, ETH_PHY_MDIO, ETH_PHY_POWER, ETH_CLK_MODE);
-  ETH.setDefault();
+  // Keep the existing routing setup; measurement binds each ping to its interface.
+}
+
+String NetworkController::listarSSIDs() {
+ String ssids[NUM_REDES],senhas[NUM_REDES];int idx;
+ carregarRedes(ssids,senhas,idx);String result;
+ for(int i=0;i<NUM_REDES;i++)if(ssids[i].length())result+=ssids[i]+"\n";
+ return result.length()?result:String("\n");
+}
+bool NetworkController::adicionarRede(const String& ssid,const String& senha,String& erro) {
+ if(_dadosProntosParaSalvar){erro="Reinicio em andamento";return false;}
+ if(ssid.isEmpty() || ssid.length()>32 || ssid.indexOf('\n')>=0 || ssid.indexOf('\r')>=0){erro="SSID deve conter de 1 a 32 bytes";return false;}
+ bool hex=senha.length()==64;
+ if(hex)for(size_t i=0;i<senha.length();i++)if(!isxdigit((unsigned char)senha[i])){hex=false;break;}
+ if(!senha.isEmpty() && !(senha.length()>=8 && senha.length()<=63) && !hex){erro="Senha: 8 a 63 bytes ou 64 caracteres hexadecimais";return false;}
+ String ssids[NUM_REDES],senhas[NUM_REDES];int idx;
+ carregarRedes(ssids,senhas,idx);
+ if(!_prefs.begin("wifi",false)){erro="Falha ao abrir configuracoes";return false;}
+ uint8_t next=_prefs.getUChar("next",0);if(next>=NUM_REDES)next=0;
+ int slot=-1;for(int i=0;i<NUM_REDES;i++)if(ssids[i]==ssid){slot=i;break;}
+ bool existing=slot>=0;if(!existing)slot=next;
+ String sk="s"+String(slot),pk="p"+String(slot);
+ uint8_t newNext=existing?next:uint8_t((slot+1)%NUM_REDES);
+ _prefs.putString(sk.c_str(),ssid);_prefs.putString(pk.c_str(),senha);_prefs.putUChar("next",newNext);
+ bool ok=_prefs.isKey(sk.c_str()) && _prefs.isKey(pk.c_str()) &&
+   _prefs.getString(sk.c_str())==ssid && _prefs.getString(pk.c_str())==senha && _prefs.getUChar("next",255)==newNext;
+ if(!ok){
+  _prefs.putString(sk.c_str(),ssids[slot]);_prefs.putString(pk.c_str(),senhas[slot]);_prefs.putUChar("next",next);
+  bool restored=_prefs.isKey(sk.c_str()) && _prefs.isKey(pk.c_str()) && _prefs.getString(sk.c_str())==ssids[slot] && _prefs.getString(pk.c_str())==senhas[slot] && _prefs.getUChar("next",255)==next;
+  erro=restored?"Falha ao gravar; perfil anterior restaurado":"Falha ao gravar e restaurar; revise os perfis";
+ }
+ _prefs.end();return ok;
 }

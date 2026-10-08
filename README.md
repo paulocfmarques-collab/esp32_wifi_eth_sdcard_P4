@@ -1,306 +1,111 @@
-# ESP32 WiFi + Ethernet + SD Card + OLED Control Platform
+# ESP32-P4 — OLED Network Monitor
 
-[![ESP32](https://img.shields.io/badge/ESP32-P4-blue?style=for-the-badge&logo=espressif)](https://www.espressif.com/)
-[![Arduino](https://img.shields.io/badge/Arduino-Compatible-green?style=for-the-badge&logo=arduino)](https://www.arduino.cc/)
-[![License](https://img.shields.io/badge/License-See%20repo-lightgrey?style=for-the-badge)](./LICENSE)
+Firmware v1.7.0, based on the supplied Wi-Fi / Ethernet / SD project.
+Hardware pins and all existing commands are preserved. Use the original board,
+ESP32 Arduino core and libraries configured for your ESP32-P4 and Wi-Fi companion.
+This update does not configure the companion or change SDMMC wiring.
 
-A polished embedded firmware platform for the **ESP32-P4 DevKit** that combines **Wi-Fi**, **Ethernet**, **SD card logging**, **OLED status display**, **NTP time synchronization**, and a **UDP remote command console** in a single modular codebase.
+## OLED pages
 
-This repository is organized as an Arduino/ESP32 sketch plus helper modules for networking, display, storage, time handling, and command processing.
+The SSD1306 128×64 display refreshes once per second and rotates pages every
+eight seconds by default. Each frame is composed in the existing display buffer
+before being transferred to the OLED. This is a monochrome display.
 
----
-
-## Premium GitHub Edition
-
-This README has been refined to work well as a **project showcase page on GitHub**:
-
-- clear value proposition at the top
-- visual badges for quick scanning
-- architecture-first documentation
-- feature summaries for contributors and visitors
-- operational flow and command reference
-- setup, troubleshooting, and roadmap sections
-
-If you are using this project in a portfolio, client demo, or open-source showcase, this version is designed to feel more professional and easier to navigate.
-
----
-
-## What This Project Does
-
-The firmware can operate as a compact networked controller with:
-
-- **Wi-Fi station mode** using stored credentials
-- **Wi-Fi access point mode** with a local configuration portal
-- **Ethernet support** with automatic fallback and route priority
-- **SD card logging** for diagnostics and system events
-- **OLED display** for live status and log history
-- **UDP command interface** on port `4210`
-- **NTP time synchronization** for accurate timestamps
-- **Reset button support** to clear saved Wi-Fi settings
-
-It is well suited for remote monitoring, device orchestration, network test setups, and embedded data-logging applications.
-
----
-
-## Key Highlights
-
-- Modular architecture with separate components for network, display, storage, time, and commands
-- Dual-network support: Wi-Fi and Ethernet
-- Captive portal for quick field configuration
-- Persistent preferences storage for Wi-Fi and time settings
-- Internal temperature sensor support
-- Timestamped SD card logs
-- OLED live clock and scrolling status lines
-- UDP remote control and telemetry
-
----
-
-## Hardware Overview
-
-| Function | ESP32-P4 Pin | Purpose |
-| --- | --- | --- |
-| OLED SDA | GPIO7 | I2C data |
-| OLED SCL | GPIO8 | I2C clock |
-| Status LED | GPIO1 | Visual system indicator |
-| Reset Button | GPIO2 | Clears saved Wi-Fi settings |
-| Ethernet MDC | GPIO31 | PHY management |
-| Ethernet MDIO | GPIO52 | PHY management |
-| Ethernet Power/Reset | GPIO51 | PHY power control |
-| SD Card | SD_MMC | Native storage and logging |
-
-> The current firmware targets the **ESP32-P4 DevKit** and uses `ETH_PHY_IP101` by default.
-
----
-
-## Architecture
-
-```mermaid
-flowchart TD
-    USER[User / Client PC] -->|UDP 4210| FW[ESP32-P4 Firmware]
-    FW --> WIFI[Wi-Fi STA / AP]
-    FW --> ETH[Ethernet PHY]
-    FW --> OLED[OLED Status Display]
-    FW --> SD[SD Card Logging]
-    FW --> NTP[NTP Time Sync]
-    FW --> CMD[Remote Command Handler]
-    FW --> PREFS[Preferences Storage]
-```
-
-### Runtime Flow
-
-1. Boot at `115200` baud
-2. Initialize LED, reset button, OLED, SD card, and networking
-3. Try saved Wi-Fi credentials
-4. If Wi-Fi connects, show IP and sync time
-5. Bring up Ethernet and configure route priority
-6. If Wi-Fi credentials are missing, start the configuration portal
-7. Process UDP commands and update OLED/logs continuously
-
----
-
-## Current Firmware Modules
-
-| File | Role |
+| Command | Page |
 | --- | --- |
-| `wifi_Eth_SDCard.ino` | Main setup and loop orchestration |
-| `DeviceConfig.h` | Hardware pins and system constants |
-| `NetworkController.h/.cpp` | Wi-Fi, Ethernet, portal, UDP, and route management |
-| `OledDisplay.h/.cpp` | OLED rendering and message history |
-| `StorageManager.h/.cpp` | SD card mounting and log writing |
-| `TimeManager.h/.cpp` | NTP sync and time formatting |
-| `SlaveCommandHandler.h/.cpp` | Command parsing and remote actions |
+| `tela:0` | Clock, date and interface status |
+| `tela:1` | Wi-Fi SSID, IP, gateway, RSSI and signal bars |
+| `tela:2` | Ethernet status, IP, gateway, disconnect count and offline time |
+| `tela:3` | CPU, free/minimum heap, SD mount status and uptime |
+| `tela:4` | Gateway RTT for each interface, timeout percentage and history graph |
+| `tela:5` | Four most recent connection events, timestamped since boot |
+| `tela:next` | Advance one page and stop automatic rotation |
+| `tela:auto` | Resume rotation every eight seconds |
+| `net_monitor` | Retrieve network statistics and recent events via UDP |
 
----
+A command or network log temporarily displays the original console for five
+seconds. File transfer progress keeps the terminal visible until completion.
+Selecting a page takes effect immediately on the next display refresh.
 
-## Features
+## Physical button
 
-- Automatic Wi-Fi credential loading
-- Access point portal at `http://192.168.4.1`
-- Ethernet initialization and priority configuration
-- SD card mount and log writing to `/log.txt`
-- OLED screen with clock, history, and optional progress UI
-- Internal temperature reading
-- Remote command execution over UDP
-- File listing and SD file access via commands
-- Reset workflow to erase Wi-Fi credentials without reflashing
+GPIO 2, wired to ground with INPUT_PULLUP:
 
----
+- Short press and release: advance one page, disabling automatic rotation.
+- Hold for five seconds, then release: clear saved Wi-Fi settings and restart.
 
-## Supported UDP Commands
+The `reset_wifi` command still clears Wi-Fi settings directly. The hardware EN
+reset button is independent of GPIO 2. Firmware and SD files are not erased by
+this settings operation.
 
-The project listens on **UDP port 4210**.
+## Measurements
 
-| Command | Description |
-| --- | --- |
-| `RESET_WIFI` | Clear saved credentials and restart |
-| `LED_ON` | Turn LED on |
-| `LED_OFF` | Turn LED off |
-| `TEMP` | Read internal temperature |
-| `CPU` | Show CPU information |
-| `RAM` | Show memory status |
-| `FLASH` | Show flash usage information |
-| `INIT` | Show reset reason |
-| `UPTIME` | Show uptime |
-| `MAC` | Show MAC address |
-| `NET_INFO` | Show network status |
-| `LIST` | List SD card files |
-| `READ:path` | Read a file from SD card |
-| `DEL:path` | Delete a file from SD card |
-| `LED_PISCA:x:y` | Blink the LED x times with y ms interval |
-| `LED_BLINK:n` | Continuous blink with n ms interval |
+The monitor uses the native ESP-IDF ICMP API, without an additional ping library.
+One asynchronous ping starts approximately every five seconds. With both links
+online, Wi-Fi and Ethernet alternate, giving each a sample approximately every
+ten seconds. With only one online, that interface is sampled every five seconds.
+Each request is bound to its interface and targets that interface's gateway.
+Timeout is one second. Bar height represents RTT on an adaptive scale; crosses
+represent unanswered pings. Each interface retains 24 results.
 
-### Example
+A timeout can mean that the router filters ICMP; it does not establish that Wi-Fi
+or Ethernet disconnected and does not measure Internet reachability. Connection
+status, drops, offline duration and four recent events are observed by the main
+loop. Statistics are stored in RAM and reset on reboot. Existing blocking SD,
+LED and setup operations can delay observation of connection changes.
 
-```bash
-# Turn on the LED
-echo "LED_ON" | nc -u 192.168.1.100 4210
+Ethernet now starts even when no saved Wi-Fi network connects. UDP is also opened
+in AP mode. Network events are queued for processing in the main loop, avoiding
+OLED I2C access from the event task. Gateway ping callbacks only publish results.
+The existing Wi-Fi/Ethernet route priorities are applied as interfaces appear.
+NTP settings are loaded on startup so synchronization can also use Ethernet.
 
-# Read temperature
-echo "TEMP" | nc -u 192.168.1.100 4210
+## UDP and installation
 
-# List SD contents
-echo "LIST" | nc -u 192.168.1.100 4210
-```
+UDP port: **4210**. HTTP portal: `/`, `/info`, `/wifi`. Existing system, LED,
+time and SD commands remain available through `help`. Commands exceeding 254
+bytes are rejected before parsing; this fixes the original buffer overflow.
 
----
+Extract the ZIP and open `wifi_Eth_SDCard/wifi_Eth_SDCard.ino`. Keep all headers
+and source files together, including the two new `NetworkMonitor` files.
 
-## Configuration Portal
+Validation performed: source structure, local includes, command preservation,
+page integration and ZIP integrity. Compilation and board tests remain pending.
+Recommended board checks: each page, both links together, cable disconnect,
+Wi-Fi disconnect, gateway filtering ICMP, AP-only boot, SD commands and short/
+long button presses.
 
-When no Wi-Fi credentials are stored, the device starts an access point:
+API references: [Espressif ICMP Echo](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/protocols/icmp_echo.html)
+and [ESP-NETIF interface index](https://docs.espressif.com/projects/esp-idf/en/release-v5.1/esp32/api-reference/network/esp_netif.html).
 
-- **SSID:** `ESP32_P4_CONFIG`
-- **Portal IP:** `192.168.4.1`
+## Version 1.5.1
 
-Users can enter one or more SSIDs and passwords, save them to flash memory, and reboot automatically into station mode.
+Network reports now show successful RTT minimum/mean/maximum and sample age.
+Timeouts are excluded from RTT averages. The HTTP `/info` page includes the
+network report. OLED latency graphs show the selected interface's sample age.
+LED blinking runs through the main loop without blocking network handling;
+`led_on`/`led_off` cancel blinking. Holding the GPIO 2 button no longer blocks
+network handling; releasing it after five seconds performs the Wi-Fi reset.
+Single quotes are escaped in configuration page HTML attributes.
 
----
+## Modern local portal — 1.6.0
 
-## SD Card Logging
+Responsive `/info` and `/wifi` pages use self-contained styling and scripts.
+Information cards show both links, system health, saved profiles and connection
+history. The five-profile editor provides show/hide controls, active profile
+badges and an explicit open-network option without exposing stored passwords.
 
-Logs are written to:
+The server validates the complete submission, verifies Preferences readback and
+schedules restart only after success. Failed writes trigger a verified attempt
+to restore the old profiles, with a visible error and no scheduled restart.
+Multi-key updates are not power-loss atomic. Existing UDP commands are retained.
 
-```text
-/log.txt
-```
+## Comandos — 1.7.0
 
-Example format:
-
-```text
-[25/09/2026 08:15:30] OLED Pronto!
-[25/09/2026 08:15:31] Wifi Conectado!
-[25/09/2026 08:15:33] NTP Status SUCESSO! Sincronização concluída.
-```
-
-If time is not yet synchronized, the system falls back to a placeholder timestamp.
-
----
-
-## Time Synchronization
-
-The project synchronizes with multiple NTP sources:
-
-- `a.st1.ntp.br`
-- `pool.ntp.org`
-- `time.nist.gov`
-
-The default time zone is stored in preferences and currently defaults to **UTC-3**.
-
----
-
-## Build Requirements
-
-### Arduino Libraries
-
-Most dependencies are built-in to the ESP32 platform, plus:
-
-- Adafruit GFX Library
-- Adafruit SSD1306
-
-### Suggested Arduino IDE Settings
-
-1. **Board:** ESP32 P4 Dev Module or compatible P4 board
-2. **CPU Frequency:** 240 MHz
-3. **Flash Size:** 4MB or higher
-4. **Upload Speed:** 921600 or 460800
-5. **Port:** Correct serial port for your board
-
-### Build Steps
-
-1. Open `wifi_Eth_SDCard.ino`
-2. Select the correct board and port
-3. Compile the sketch
-4. Upload to the ESP32-P4
-5. Open Serial Monitor at `115200`
-
----
-
-## Troubleshooting
-
-### OLED Not Working
-
-- Check GPIO7 (SDA) and GPIO8 (SCL)
-- Verify the display address is `0x3C`
-- Confirm the serial output shows `OLED Pronto!`
-
-### SD Card Not Mounting
-
-- Use FAT32 or exFAT formatting
-- Reinsert the card and check seating
-- Review serial logs for mount errors
-
-### Wi-Fi Connection Fails
-
-- Use the `RESET_WIFI` command
-- Confirm credentials in the portal
-- Move closer to the access point
-
-### Ethernet Issues
-
-- Confirm PHY wiring on GPIO31, GPIO52, and GPIO51
-- Verify the PHY type in `DeviceConfig.h`
-- Check cable connection and network link status
-
-### NTP Sync Problems
-
-- Ensure network connectivity is active
-- Wait longer on first boot
-- Check whether DNS or internet access is blocked
-
----
-
-## Project Status
-
-- Core Wi-Fi setup and portal: implemented
-- Ethernet support: implemented
-- SD logging: implemented
-- OLED UI: implemented
-- UDP command console: implemented
-- NTP synchronization: implemented
-- Reset and recovery workflow: implemented
-
----
-
-## Roadmap
-
-Possible next additions:
-
-- MQTT support
-- HTTP/JSON API
-- OTA firmware updates
-- Web dashboard
-- CSV/JSON export
-- Additional sensors
-- Watchdog support
-- Power management modes
-
----
-
-## License
-
-Add your license file if you want to publish the project publicly.
-
----
-
-## Contribution
-
-Pull requests and issues are welcome.
+Novos comandos: `wifi_add`, `wifi_list`, `wifi_status`, `eth_status`, `channel`,
+`chip_info`, `heap_min`, `psram`, `health`, `selftest`, `ntp_status`, `sd_append`,
+`sd_mkdir`, `sd_rmdir`; aliases `init` e `flash_info`. `net_info` inclui gateways,
+máscaras e DNS de ambas as interfaces. Credenciais Wi-Fi são ocultadas dos logs.
+`help` e `COMANDOS.md` foram atualizados; consulte o Markdown para sintaxe, exemplos
+e os comandos anteriores. `set_fuso` aceita somente inteiros -12..14; `dst` somente
+0 ou 1. Compile e teste na placa antes de usar esta versão.

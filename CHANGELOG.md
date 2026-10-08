@@ -1,32 +1,43 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## 1.7.0
 
-The format is inspired by Keep a Changelog, and the project follows semantic versioning where practical.
+- Add circular Wi-Fi profile commands with verified persistence and redacted logs.
+- Add link, channel, PSRAM, chip, heap and clock diagnostics.
+- Add SD append and directory creation/removal.
+- Expand help and replace the command reference with a complete verified list.
+- Validate timezone and daylight-saving command arguments.
+- Preserve existing command names and aliases.
 
-## [Unreleased]
 
-### Added
-- Premium GitHub-focused README presentation.
-- Updated project documentation based on the current firmware structure.
-- Initial changelog file in English.
+## 1.6.0
 
-## [1.4.3] - 2026-10-07
+- Redesign local information and five-profile Wi-Fi pages for desktop and mobile.
+- Bundle styles/scripts locally; add connection badges and password visibility controls.
+- Keep stored passwords out of HTML and add explicit open-network selection.
+- Validate complete form submissions and verify credential persistence before reboot.
+- Attempt to restore prior profiles on write failure; report restoration errors.
+- Schedule restart after the HTTP success response without a blocking delay.
 
-### Added
-- UDP command processing with support for system, network, SD card, and LED actions.
-- OLED status output with live clock and scrollable message history.
-- SD card log recording with timestamp support.
-- NTP synchronization using configurable stored time settings.
-- Ethernet initialization and route priority configuration.
-- Wi-Fi configuration portal with saved credentials in flash preferences.
-- Reset button support for clearing saved Wi-Fi settings.
 
-### Changed
-- Main firmware orchestration refined around modular controllers for display, storage, network, time, and commands.
-- Network startup flow now displays the assigned IP address after a successful Wi-Fi connection.
-- Time management now loads time zone configuration from preferences before NTP sync.
-- Documentation refreshed to match the current repository modules and runtime behavior.
+## 1.5.1
 
-### Fixed
-- Improved consistency between the documented architecture and the active codebase.
+- Add RTT min/mean/max and sample age to network reports.
+- Show network telemetry in HTTP `/info`.
+- Make LED blinking and reset-button hold nonblocking.
+- Show the selected graph sample age on OLED.
+- Escape single quotes in SSID HTML attributes.
+
+
+## 1.5.0
+
+- Add six OLED pages, automatic rotation and manual page commands.
+- Add per-interface asynchronous gateway ping, 24-result graphs, drop/offline
+  counters and four recent connection events.
+- Add `net_monitor`, `tela:0..5`, `tela:next` and `tela:auto`; update `help`.
+- Use GPIO 2 short press for navigation and five-second hold/release for Wi-Fi reset.
+- Defer network OLED events to the main loop.
+- Start Ethernet independently of Wi-Fi connection success; enable UDP in AP mode.
+- Load NTP configuration on every boot.
+- Reject oversized UDP commands and reserve buffer space for the terminator.
+- Preserve hardware pin definitions and existing command names and aliases.

@@ -20,7 +20,9 @@ void setup() {
 
   oled.inicializar();
   storage.inicializar();
-  network.inicializar(); 
+  network.inicializar();
+  network.ativarEthernetFisica();
+  localTime.carregarEConfigurarHorario(); 
 
   if (network.conectarWifi()) {
     storage.gravarLog("Wi-Fi Conectado com Sucesso!");
@@ -41,7 +43,7 @@ void setup() {
     localTime.inicializarETestarNTP();
     
     delay(1000);
-    network.ativarEthernetFisica(); 
+    // Ethernet also starts when no Wi-Fi credentials are available. 
     network.configurarPrioridadeDeRede();
     
     localTime.imprimirDataHora();
@@ -52,26 +54,41 @@ void setup() {
 
 void loop() {
   network.processarPortalERedes();
+  cmdHandler.atualizar();
 
-  if (WiFi.status() == WL_CONNECTED) {
-    oled.atualizarRelogioSuperior(localTime);
-  }
+  oled.atualizarPainel(localTime, network, storage);
 
   WiFiUDP& udp = network.getUdpDriver();
   int packetSize = udp.parsePacket();
   if (packetSize) {
     char packetBuffer[255]; 
-    int len = udp.read(packetBuffer, 255);
+    if (packetSize >= int(sizeof(packetBuffer))) {
+      while (udp.available()) udp.read(packetBuffer, sizeof(packetBuffer));
+      network.responderUDP("Erro: comando excede 254 bytes\n");
+      return;
+    }
+    int len = udp.read(packetBuffer, sizeof(packetBuffer) - 1);
     if (len > 0) {
       packetBuffer[len] = 0;
       cmdHandler.executar(String(packetBuffer));
     }
   }
 
-  if (digitalRead(BOTAO_RESET) == LOW) {
-    delay(50); 
-    if (digitalRead(BOTAO_RESET) == LOW) {
-      network.zerarConfiguracoes();
-    }
+  // Short press: next page. Hold five seconds: clear saved Wi-Fi settings.
+  static bool resetArmed = false;
+  static int readingBefore = HIGH, stable = HIGH;
+  static uint32_t changedAt = 0, pressedAt = 0;
+  int reading = digitalRead(BOTAO_RESET);
+  if (reading != readingBefore) changedAt = millis();
+  if (millis() - changedAt >= 50 && reading != stable) {
+    stable = reading;
+    if (stable == LOW) { pressedAt = millis(); resetArmed = false; }
+    else if (resetArmed || millis() - pressedAt >= 5000) network.zerarConfiguracoes();
+    else oled.avancarPagina();
+  }
+  readingBefore = reading;
+  if (stable == LOW && !resetArmed && millis() - pressedAt >= 5000) {
+    oled.adicionarLinha("Solte para limpar WiFi");
+    resetArmed = true;
   }
 }

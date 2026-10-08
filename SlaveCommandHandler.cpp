@@ -2,7 +2,7 @@
 #include "SD_MMC.h"
 #include <esp_system.h>
 
-#define FIRMWARE_VERSION "v1.4.3"
+#define FIRMWARE_VERSION "v1.7.0"
 
 static String _ultimoComando = "Nenhum";
 static uint32_t _totalComandos = 0;
@@ -32,7 +32,8 @@ SlaveCommandHandler::SlaveCommandHandler(OledDisplay& o, StorageManager& s, Netw
   : _oled(o), _storage(s), _net(n), _time(t) {}
 
 void SlaveCommandHandler::executar(String cmd) {
-  cmd.trim();
+  // Preserve password whitespace; trim only the command name below.
+  while(cmd.endsWith("\r") || cmd.endsWith("\n")) cmd.remove(cmd.length()-1);
 
   // Nome do comando em minusculas; o argumento (apos ':') preserva a caixa original
   String arg = "";
@@ -46,7 +47,9 @@ void SlaveCommandHandler::executar(String cmd) {
   nome.toLowerCase();
 
   // Apelidos dos nomes antigos
-  if (nome == "restart") nome = "reboot";
+  if (nome == "init") nome = "reason";
+  else if (nome == "flash_info") nome = "flash";
+  else if (nome == "restart") nome = "reboot";
   else if (nome == "list") nome = "sd_list";
   else if (nome == "read") nome = "sd_read";
   else if (nome == "write") nome = "sd_write";
@@ -58,13 +61,14 @@ void SlaveCommandHandler::executar(String cmd) {
   else if (nome == "set_tz") nome = "set_fuso";
   else if (nome == "set_dst") nome = "dst";
 
+  String visible = nome == "wifi_add" ? String("wifi_add:[credenciais ocultas]") : cmd;
   if (nome != "lastcmd" && nome != "cmdcount") {
-    _ultimoComando = cmd;
+    _ultimoComando = visible;
     _totalComandos++;
   }
 
-  _oled.adicionarLinha("> " + cmd);
-  _storage.gravarLog("> " + cmd);
+  _oled.adicionarLinha("> " + visible);
+  _storage.gravarLog("> " + visible);
 
   char* pMsg = (char*)calloc(512, sizeof(char));
   if (!pMsg) return;
@@ -80,6 +84,16 @@ void SlaveCommandHandler::executar(String cmd) {
   // ─── Sistema ───
   if (nome == "lastcmd") {
     _net.responderUDP("Ultimo Comando: " + _ultimoComando + "\n");
+  }
+  else if (nome == "net_monitor") {
+    _net.responderUDP(_net.monitor().report());
+  }
+  else if (nome == "tela") {
+    if (arg == "auto") { _oled.paginasAutomaticas(); _net.responderUDP("Telas automaticas (8 s)\n"); }
+    else if (arg == "next") { _oled.avancarPagina(); _net.responderUDP("Proxima tela\n"); }
+    else if (arg.length() == 1 && arg[0] >= '0' && arg[0] <= '5') {
+      _oled.selecionarPagina(arg.toInt()); _net.responderUDP("Tela selecionada\n");
+    } else _net.responderUDP("Use tela:0..5, tela:next ou tela:auto\n");
   }
   else if (nome == "cmdcount") {
     sprintf(pMsg, "Total Comandos: %u\n", (unsigned)_totalComandos);
@@ -140,12 +154,15 @@ void SlaveCommandHandler::executar(String cmd) {
   }
   else if (nome == "help") {
     _net.responderUDP(
-      "Sistema: info status version build reason help reboot reset_wifi alive lastcmd cmdcount\n"
-      "Hardware: temp cpu ram heap flash uptime\n"
-      "Rede: net_info mac rssi ip ssid\n"
-      "Hora: time date set_fuso:N dst_on dst_off\n"
-      "LED: led_on led_off led_blink[:ms]\n"
-      "SD: sd_status sd_list sd_read:arq sd_write:arq:txt sd_del:arq sd_exists:arq sd_size:arq sd_tail:arq[:n] sd_log sd_clear_log\n");
+      "Sistema: help info status version build reason alive uptime lastcmd cmdcount reboot\n"
+      "Diagnostico: health selftest temp cpu chip_info ram heap heap_min psram flash flash_info\n"
+      "Rede: net_info net_monitor eth_status mac rssi ip ssid channel wifi_status wifi_list wifi_add:SSID|SENHA reset_wifi\n"
+      "OLED: tela:0..5 tela:next tela:auto\n"
+      "Hora: time date ntp_status set_fuso:N dst_on dst_off dst:0|1\n"
+      "LED: led_on led_off led_blink[:duracao_ms]\n"
+      "SD: sd_status sd_list sd_read:arquivo sd_write:arquivo:texto sd_append:arquivo:texto sd_del:arquivo sd_exists:arquivo sd_size:arquivo sd_tail:arquivo[:linhas] sd_log[:linhas] sd_clear_log sd_mkdir:pasta sd_rmdir:pasta\n"
+      "wifi_add: lista circular de 5 redes; senha vazia = rede aberta; aplique com reboot.\n"
+      "Aliases: init=reason restart=reboot list=sd_list read=sd_read write=sd_write delete=sd_del exists=sd_exists size=sd_size tail=sd_tail sd_info=sd_status set_tz=set_fuso set_dst=dst\n");
   }
   else if (nome == "reset_wifi") {
     free(pMsg);
@@ -176,6 +193,25 @@ void SlaveCommandHandler::executar(String cmd) {
             (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
     _net.responderUDP(pMsg);
   }
+  else if (nome == "chip_info") {
+    snprintf(pMsg,512,"Chip: %s\nRevisao: %u\nNucleos: %u\nCPU: %u MHz\nSDK: %s\n",
+      ESP.getChipModel(),(unsigned)ESP.getChipRevision(),(unsigned)ESP.getChipCores(),(unsigned)ESP.getCpuFreqMHz(),ESP.getSdkVersion());
+    _net.responderUDP(pMsg);
+  }
+  else if (nome == "heap_min") {
+    _net.responderUDP("Menor heap livre: "+String(ESP.getMinFreeHeap())+" B\n");
+  }
+  else if (nome == "psram") {
+    _net.responderUDP("PSRAM total: "+String(ESP.getPsramSize())+" B\nPSRAM livre: "+String(ESP.getFreePsram())+" B\n");
+  }
+  else if (nome == "health" || nome == "selftest") {
+    struct tm t;bool clock=getLocalTime(&t,10);
+    snprintf(pMsg,512,"DIAGNOSTICO (somente leitura)\nWiFi: %s\nEthernet: %s\nOLED: %s\nSD montado: %s\nRelogio valido: %s\nHeap livre/minimo: %u/%u B\nPSRAM total/livre: %u/%u B\n",
+      WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE",NetworkController::ethConectado?"ONLINE":"OFFLINE",
+      _oled.isPronto()?"OK":"FALHA",_storage.isAtivo()?"SIM":"NAO",clock?"SIM":"NAO",
+      (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMinFreeHeap(),(unsigned)ESP.getPsramSize(),(unsigned)ESP.getFreePsram());
+    _net.responderUDP(pMsg);
+  }
   else if (nome == "heap") {
     sprintf(pMsg, "Heap livre: %u B\n", (unsigned)ESP.getFreeHeap());
     _net.responderUDP(pMsg);
@@ -191,8 +227,32 @@ void SlaveCommandHandler::executar(String cmd) {
   }
   // ─── Rede ───
   else if (nome == "net_info") {
-    _net.responderUDP("NET:\nIP: " + WiFi.localIP().toString() + "\nETH: " + ETH.localIP().toString() +
-                      "\nRSSI: " + String(WiFi.RSSI()) + " dBm\nSSID: " + WiFi.SSID() + "\n");
+    _net.responderUDP("WiFi: "+String(WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE")+
+      "\nSSID: "+WiFi.SSID()+"\nIP: "+WiFi.localIP().toString()+"\nGateway: "+WiFi.gatewayIP().toString()+
+      "\nMascara: "+WiFi.subnetMask().toString()+"\nDNS: "+WiFi.dnsIP().toString()+
+      "\nEthernet: "+String(NetworkController::ethConectado?"ONLINE":"OFFLINE")+"\nIP ETH: "+ETH.localIP().toString()+
+      "\nGateway ETH: "+ETH.gatewayIP().toString()+"\nMascara ETH: "+ETH.subnetMask().toString()+"\nDNS ETH: "+ETH.dnsIP().toString()+"\n");
+  }
+  else if (nome == "wifi_list") { _net.responderUDP(_net.listarSSIDs()); }
+  else if (nome == "wifi_add") {
+    int divider=arg.indexOf('|');String error;
+    if(divider<=0) _net.responderUDP("Use wifi_add:SSID|SENHA (senha vazia para rede aberta)\n");
+    else if(_net.adicionarRede(arg.substring(0,divider),arg.substring(divider+1),error))
+      _net.responderUDP("Rede salva e verificada. Use reboot para aplicar.\n");
+    else _net.responderUDP("Erro: "+error+"\n");
+  }
+  else if (nome == "channel") {
+    _net.responderUDP("Canal WiFi: "+String(WiFi.channel())+"\n");
+  }
+  else if (nome == "wifi_status") {
+    _net.responderUDP("WiFi: "+String(WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE")+
+      "\nStatus: "+String((int)WiFi.status())+"\nModo: "+String((int)WiFi.getMode())+"\nSSID: "+WiFi.SSID()+
+      "\nIP: "+WiFi.localIP().toString()+"\nIP AP: "+WiFi.softAPIP().toString()+"\n");
+  }
+  else if (nome == "eth_status") {
+    _net.responderUDP("Ethernet: "+String(NetworkController::ethConectado?"ONLINE":"OFFLINE")+
+      "\nCabo: "+String(ETH.linkUp()?"conectado":"desconectado")+"\nIP: "+ETH.localIP().toString()+
+      "\nGateway: "+ETH.gatewayIP().toString()+"\nMAC: "+ETH.macAddress()+"\n");
   }
   else if (nome == "mac") {
     _net.responderUDP("MAC: " + WiFi.macAddress() + "\n");
@@ -207,6 +267,11 @@ void SlaveCommandHandler::executar(String cmd) {
     _net.responderUDP("SSID: " + WiFi.SSID() + "\n");
   }
   // ─── Hora ───
+  else if (nome == "ntp_status") {
+    struct tm t; bool valid=getLocalTime(&t,10);
+    _net.responderUDP(String("Relogio: ")+(valid?"VALIDO":"SEM SINCRONIZACAO")+
+      "\nHora local: "+_time.obterStringDataHora()+"\nServidores configurados: a.st1.ntp.br, pool.ntp.org, time.nist.gov\nRelogio valido nao confirma alcance atual dos servidores NTP.\n");
+  }
   else if (nome == "date") {
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 100)) {
@@ -225,13 +290,18 @@ void SlaveCommandHandler::executar(String cmd) {
     _net.responderUDP("Hora:\n" + horaStr + "\n");
   }
   else if (nome == "set_fuso") {
-    int fusoHoras = arg.toInt();
+    String number=arg;number.trim();
+    bool numeric=number.length()>0;
+    for(size_t i=0;i<number.length();i++) if(!isDigit(number[i]) && !(i==0 && number.length()>1 && (number[i]=='-' || number[i]=='+'))) numeric=false;
+    int fusoHoras=number.toInt();
+    if(!numeric || number.length()>3 || fusoHoras < -12 || fusoHoras > 14){_net.responderUDP("Use set_fuso:N com inteiro entre -12 e +14\n");free(pMsg);return;}
     long novoGmtOffset = (long)fusoHoras * 3600;
     _time.atualizarFuso(novoGmtOffset);
     sprintf(pMsg, "Fuso alterado para UTC %d (%ld s)\n", fusoHoras, novoGmtOffset);
     _net.responderUDP(pMsg);
   }
   else if (nome == "dst_on" || nome == "dst_off" || nome == "dst") {
+    if(nome=="dst" && arg!="0" && arg!="1"){_net.responderUDP("Use dst:0 ou dst:1\n");free(pMsg);return;}
     int dstHoras = (nome == "dst_on") ? 1 : (nome == "dst_off") ? 0 : arg.toInt();
     _time.atualizarDST(dstHoras * 3600);
     sprintf(pMsg, "Horario de verao: %dh\n", dstHoras);
@@ -239,10 +309,12 @@ void SlaveCommandHandler::executar(String cmd) {
   }
   // ─── LED ───
   else if (nome == "led_on") {
+    pararLedBlink();
     digitalWrite(LED_PIN, HIGH);
     _net.responderUDP("LED ligado\n");
   }
   else if (nome == "led_off") {
+    pararLedBlink();
     digitalWrite(LED_PIN, LOW);
     _net.responderUDP("LED desligado\n");
   }
@@ -251,12 +323,9 @@ void SlaveCommandHandler::executar(String cmd) {
     if (ms <= 0) ms = 3000;
     if (ms > 10000) ms = 10000;
     _net.responderUDP("LED piscando\n");
-    unsigned long ini = millis();
-    while (millis() - ini < (unsigned long)ms) {
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-      delay(200);
-    }
-    digitalWrite(LED_PIN, LOW);
+    _ledStarted = _ledChanged = millis();
+    _ledDuration = uint32_t(ms); _ledBlinking = true;
+    digitalWrite(LED_PIN, HIGH);
   }
   // ─── SD ───
   else if (nome == "sd_status") {
@@ -344,27 +413,37 @@ void SlaveCommandHandler::executar(String cmd) {
       }
     }
   }
-  else if (nome == "sd_write") {
+  else if (nome == "sd_write" || nome == "sd_append") {
     arg.trim();
     // Aceita "arquivo:conteudo" (padrao) ou "arquivo=conteudo" (formato antigo)
     int ic = arg.indexOf(':');
     int ie = arg.indexOf('=');
     int i = (ic == -1) ? ie : (ie == -1 ? ic : min(ic, ie));
     if (i == -1) {
-      _net.responderUDP("Erro: Formato invalido. Use sd_write:/arquivo.txt:conteudo\n");
+      _net.responderUDP("Erro: Formato invalido. Use sd_write:/arquivo.txt:conteudo ou sd_append:/arquivo.txt:conteudo\n");
     } else {
       String caminho = normalizarCaminho(arg.substring(0, i));
       String conteudo = arg.substring(i + 1);
-      File arquivo = SD_MMC.open(caminho, FILE_WRITE);
+      File arquivo = SD_MMC.open(caminho, nome == "sd_append" ? FILE_APPEND : FILE_WRITE);
       if (!arquivo) {
         _storage.gravarLog("[ERRO] Falha ao abrir para escrita: " + caminho);
         _net.responderUDP("Erro ao abrir arquivo\n");
       } else {
-        arquivo.print(conteudo);
+        size_t written = nome == "sd_append" ? arquivo.println(conteudo) : arquivo.print(conteudo);
         arquivo.close();
+        size_t expected = conteudo.length() + (nome == "sd_append" ? 2 : 0);
+        if(written != expected) { _net.responderUDP("Erro: gravacao incompleta\n"); free(pMsg); return; }
         _storage.gravarLog("[SD] Arquivo gravado com sucesso: " + caminho);
         _net.responderUDP("Ok\n");
       }
+    }
+  }
+  else if (nome == "sd_mkdir" || nome == "sd_rmdir") {
+    String caminho=normalizarCaminho(arg);
+    if(arg.isEmpty() || caminho=="/") _net.responderUDP("Informe uma pasta diferente da raiz\n");
+    else {
+      bool ok=nome=="sd_mkdir" ? SD_MMC.mkdir(caminho) : SD_MMC.rmdir(caminho);
+      _net.responderUDP(ok?"Ok\n":"Falha: verifique o caminho e se a pasta esta vazia ao remover\n");
     }
   }
   else if (nome == "sd_del") {
@@ -420,4 +499,16 @@ float SlaveCommandHandler::lerTemperaturaInterna() {
   temperature_sensor_get_celsius(temp_sensor, &tsens_out);
   temperature_sensor_disable(temp_sensor);
   return tsens_out;
+}
+
+void SlaveCommandHandler::pararLedBlink() { _ledBlinking = false; }
+void SlaveCommandHandler::atualizar() {
+ if(!_ledBlinking) return;
+ uint32_t now = millis();
+ if(uint32_t(now - _ledStarted) >= _ledDuration) {
+  _ledBlinking = false; digitalWrite(LED_PIN, LOW); return;
+ }
+ if(uint32_t(now - _ledChanged) >= 200) {
+  _ledChanged = now; digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+ }
 }
