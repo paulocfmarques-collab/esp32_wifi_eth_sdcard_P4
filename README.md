@@ -1,246 +1,385 @@
-# ESP32-P4 — OLED Network Monitor
+# ESP32-P4 Wi-Fi / Ethernet / SD Card Monitor
 
-Firmware v1.11.0, based on the supplied Wi-Fi / Ethernet / SD project.
-Hardware pins and all existing commands are preserved. Use the original board,
-ESP32 Arduino core and libraries configured for your ESP32-P4 and Wi-Fi companion.
-This update does not configure the companion or change SDMMC wiring.
+[![Platform](https://img.shields.io/badge/Platform-ESP32--P4-blue)](https://www.espressif.com/)
+[![Language](https://img.shields.io/badge/Language-C%2B%2B-orange)](https://isocpp.org/)
+[![Framework](https://img.shields.io/badge/Framework-Arduino-green)](https://www.arduino.cc/)
+[![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen)](#)
+[![Docs](https://img.shields.io/badge/Docs-Ready-blueviolet)](#documentation)
+[![License](https://img.shields.io/badge/License-Unlicensed-lightgrey)](#license)
 
-## Página de log — 1.11.0
+> A polished embedded networking and monitoring firmware for the **ESP32-P4**.
 
-Abra `/logs` ou clique em **Log do dispositivo** no menu. A página consulta
-`/log.txt` no cartão SD e mostra as últimas 25, 100 ou 250 linhas, com atualização
-manual, atualização automática a cada cinco segundos, busca local e opção de
-acompanhar o final. Somente os últimos 8 KB são lidos, por posicionamento direto
-no arquivo, para limitar uso de memória e tempo de leitura de arquivos grandes.
-O conteúdo é exibido como texto; HTML no log não é executado.
+This project combines **Wi-Fi**, **Ethernet**, **SD card logging**, an **OLED dashboard**, a **local web portal**, and a **UDP command interface** into one cohesive firmware stack.
 
-`GET /api/logs?lines=100` retorna JSON com texto, tamanho do arquivo, número de
-linhas e indicação de trecho limitado. A leitura não grava outro evento no SD
-nem acorda o OLED. A atualização automática pausa em abas ocultas. Erros do SD,
-arquivo ausente e atualização OTA são informados; se houver leitura anterior,
-ela permanece visível com aviso de que pode estar desatualizada.
+It is built for embedded systems that need:
+- local observability,
+- graceful fallback behavior,
+- practical device management,
+- and no dependency on cloud services.
 
-Testes de interface: `node --test tests/portal.test.cjs tests/firmware.test.cjs tests/logs.test.cjs`.
-Os 20 testes passaram em simulação de navegador, incluindo o atalho para acordar
-o OLED; leitura real do cartão requer a placa.
+---
 
-Compilação final da versão 1.11.0 concluída com Arduino ESP32 3.3.12 e alvo
-`esp32:esp32:esp32p4`, opções padrão: **1.223.348 bytes (93%)** de programa e
-39.804 bytes de variáveis globais. Não foi gravada nem testada fisicamente na placa.
+## Why This Project Matters
 
-## Proteção do OLED — 1.10.0
+Many embedded devices are easy to build but hard to operate once deployed.
 
-O botão de despertar deste projeto é externo, entre GPIO 2 e GND. Os botões
-integrados da Waveshare ESP32-P4-WIFI6 são BOOT e RST; RST reinicia a placa e não
-gera o evento esperado no GPIO 2. BOOT/GPIO 35 compartilha Ethernet TXD1 e não foi
-reconfigurado. O terminal web oferece **Acordar tela** (`protetor:wake`);
-`botao_status` permite diagnosticar o botão externo.
+They connect to a network, but they do not always explain:
+- what they are doing,
+- how they are connected,
+- or how to recover them when something goes wrong.
 
-Após 60 segundos de inatividade, um relógio em movimento substitui o painel e o
-OLED reduz o brilho. Quatro minutos depois, o controlador apaga o display; os
-serviços do ESP32 continuam ativos. O primeiro toque no botão acorda sem mudar a
-página. Comandos normais e logs de conexão também acordam; rotação de páginas e
-consultas automáticas do navegador não contam como interação. Transferências e
-OTA mantêm o progresso visível.
+This firmware solves that by giving the ESP32-P4 its own built-in operational layer:
+- a compact OLED dashboard,
+- a responsive local portal,
+- UDP-based diagnostics,
+- SD card logging,
+- and intelligent Wi-Fi / Ethernet awareness.
 
-Comandos em todos os canais: `protetor:on`, `protetor:off`, `protetor:auto`,
-`protetor:wake`, `protetor:status` e `protetor:tempo:N` (15 a 3600 segundos).
-O status não acorda o OLED. As opções valem até reiniciar, quando retorna o padrão
-automático de 60 segundos. O botão longo e os dois cores mantêm suas funções.
-O funcionamento do relógio, brilho, desligamento e botão requer teste na placa.
+The result is a field-ready firmware platform that behaves like a complete embedded product.
 
-A versão 1.10.0 compilou sem erros com Arduino ESP32 3.3.12, alvo
-`esp32:esp32:esp32p4` e opções padrão: 1.215.452 bytes de programa (92% da partição)
-e 39.804 bytes de variáveis globais. Não foi gravada nem testada fisicamente na placa.
+---
 
-## Dois cores e atualização pela rede — 1.9.0
+## Highlights
 
-O firmware cria uma tarefa de recepção serial no **core 0** e uma tarefa do
-aplicativo no **core 1**. A recepção usa uma fila de oito comandos de 254 bytes;
-se a fila encher, o comando inteiro é descartado e a serial informa a quantidade.
-O core 1 executa comandos e coordena web, UDP, SD, OLED, LED e OTA. Isso permite
-receber serial durante operações demoradas sem acessar OLED/SD por duas tarefas
-ao mesmo tempo. Se a criação de uma tarefa falhar, o firmware informa a falha e
-usa o loop como alternativa. Consulte `cores` para verificar a execução.
+- **Dual network support** with Wi-Fi and Ethernet
+- **OLED dashboard** for real-time status visibility
+- **SD card logging** for local persistence and troubleshooting
+- **Local web portal** for configuration and inspection
+- **UDP command interface** on port `4210`
+- **Network monitoring** with ping, drops, and offline tracking
+- **NTP time synchronization** for accurate logs and timestamps
+- **Button-based navigation** and Wi-Fi reset support
+- **Fallback AP portal** when no station connection is available
 
-Atualização pelo **navegador**: abra `/firmware`, use o usuário `admin` e a senha
-mostrada na serial com o prefixo `[OTA]`. Também é possível consultar a senha com
-`ota_password` **somente pela serial local**. A senha é aleatória por dispositivo,
-gravada e verificada em Preferences e não aparece no portal, UDP ou logs do SD.
-Caso a persistência falhe, a atualização fica desabilitada. Envie apenas o `.bin`
-do aplicativo exportado pelo Arduino IDE, compilado para a mesma placa e
-configuração. Bootloader, tabelas de partições e imagens merged não são arquivos
-de atualização do aplicativo.
+---
 
-Atualização pelo **Arduino IDE**: escolha a porta de rede `esp32-p4-node` e use a
-mesma senha. ArduinoOTA usa a porta 3232 e anuncia a placa via mDNS; computador e
-placa devem estar na mesma rede. Use `ota_info` para consultar o serviço e o tamanho
-da partição OTA. O upload pelo navegador também funciona pelo AP de configuração.
+## Project Story
 
-A primeira instalação desta versão é por **USB**, com um esquema de partições
-que inclua `otadata` e dois slots de aplicativo. A tabela padrão de 4 MB testada
-na compilação tem dois slots de 1.310.720 bytes; escolha outra tabela compatível
-com a flash real da placa se seu aplicativo exceder esse limite. Atualizações OTA
-não alteram a tabela de partições nem configuram o companion Wi-Fi.
+This firmware was created for a practical embedded networking scenario:
 
-Uploads autenticados pelo navegador informam o tamanho exato e são escritos na
-partição OTA inativa. Escritas incompletas, arquivos grandes, falta de partição
-e falhas de verificação são rejeitados; o boot só muda após `Update.end(false)`
-confirmar a imagem. A placa responde antes de reiniciar. A execução de comandos
-fica suspensa durante OTA; a recepção serial continua na fila limitada. Não há
-rollback automático de um firmware que inicia e depois falha em execução.
-O portal HTTP e OTA se destinam a uma rede local confiável, sem exposição direta
-à Internet. Mantenha a alimentação durante a atualização.
+a device that must stay understandable in the field.
 
-Verificação das interfaces: `node --test tests/portal.test.cjs tests/firmware.test.cjs`.
-São 13 testes com simulação de navegador. Validação de upload real, interrupção,
-USB, descoberta OTA no IDE e funcionamento dos dois cores requer a placa.
+Instead of depending on external infrastructure, the device provides its own:
+- status display,
+- web-based recovery path,
+- command interface,
+- and persistent log storage.
 
-Compilação final concluída com Arduino ESP32 **3.3.12**, alvo
-`esp32:esp32:esp32p4` e opções padrão: **1.212.270 de 1.310.720 bytes (92%)**
-de programa e **39.788 bytes** de variáveis globais. As pilhas das tarefas e as
-alocações de rede são adicionais em tempo de execução. A compilação valida o
-alvo padrão do módulo; selecione a revisão real do chip, USB e flash da sua placa
-na instalação. Não foi realizada gravação ou teste físico da placa.
+That makes it useful for prototypes, test benches, lab devices, and real-world embedded deployments where visibility and recoverability matter.
 
-## Serial, painel e terminal web — 1.8.0
+---
 
-Abra `/info` no IP da placa. O painel atualiza seus cartões e histórico a cada
-cinco segundos sem recarregar a página nem apagar o texto do terminal. É possível
-pausar a atualização; abas ocultas suspendem as consultas. Falhas de comunicação
-aparecem no painel, mantendo a última leitura visível até a conexão voltar.
+## What It Delivers
 
-O terminal web envia os mesmos comandos do UDP e da serial. Inclui atalhos,
-histórico pelas setas para cima/baixo, limpeza da saída e confirmação para ações
-que alteram arquivos ou configurações. `wifi_add` não armazena a senha no histórico
-nem a mostra na saída. A resposta web tem limite de 8 KB; prefira `sd_tail` para
-arquivos grandes. Uma falha ou timeout não garante que o comando deixou de executar:
-confira o estado antes de repetir operações de escrita.
+| Capability | Value |
+|---|---|
+| Dual network support | Uses Wi-Fi and Ethernet with priority handling and recovery logic |
+| OLED dashboard | Displays time, connectivity, system data, and network history |
+| SD card logging | Stores timestamped events locally for troubleshooting |
+| Local web portal | Provides browser-based status and Wi-Fi configuration pages |
+| UDP control plane | Exposes diagnostics and remote actions on port 4210 |
+| Network monitoring | Tracks ping results, drops, timeouts, and offline duration |
+| Time synchronization | Uses NTP to keep logs and display data time-aware |
+| Hardware interaction | Supports button-based navigation and Wi-Fi reset |
 
-No Monitor Serial, selecione **115200 baud** e final de linha **LF, CR ou CRLF**.
-Depois da inicialização, envie um comando por linha, por exemplo `help`, `status`,
-`led_on`, `tela:next` ou `sd_list`. O limite é 254 bytes por comando em todos os
-canais. Na serial, linhas maiores são descartadas inteiras até o próximo final
-de linha; linhas vazias são ignoradas. As respostas voltam ao canal de origem;
-mensagens de diagnóstico da placa continuam aparecendo na serial.
+---
 
-Para USB nativo, habilite **USB CDC On Boot** na configuração correspondente da
-placa no Arduino IDE. Quando CDC está desabilitado, `Serial` usa a UART conforme
-a configuração original. Nenhum pino foi alterado.
+## Hardware Requirements
 
-Endpoints locais: `GET /api/dashboard` retorna o fragmento HTML dos cartões;
-`POST /api/command` recebe o campo `cmd` e exige o cabeçalho `X-ESP32-Command: 1`.
-Esse cabeçalho impede comandos enviados por formulários de outros sites, mas não
-substitui autenticação. O portal continua destinado a uma rede local confiável.
-Reinícios por comando são agendados para permitir entregar a resposta HTTP.
-Leituras extensas de arquivos SD ainda podem atrasar o atendimento de outras tarefas.
+This project is intended for an **ESP32-P4-based board** with the following peripherals:
 
-Verificação do terminal: `node --test tests/portal.test.cjs`. Os testes simulam
-envio, limite em UTF-8, confirmação, sigilo de senha, atualização do painel e
-falha de conexão. O teste físico de serial USB, UDP e navegador requer a placa.
+- **ESP32-P4**
+- **SSD1306 OLED display** via I2C
+- **Ethernet PHY IP101**
+- **MicroSD card via SD_MMC**
+- **Hardware button** for navigation and Wi-Fi reset
+- **LED** for status indication
 
-## OLED pages
+### Default Pin Mapping
 
-The SSD1306 128×64 display refreshes once per second and rotates pages every
-eight seconds by default. Each frame is composed in the existing display buffer
-before being transferred to the OLED. This is a monochrome display.
+| Component | Pin |
+|---|---:|
+| OLED SDA | GPIO 7 |
+| OLED SCL | GPIO 8 |
+| LED | GPIO 1 |
+| Button | GPIO 2 |
+| Ethernet MDC | GPIO 31 |
+| Ethernet MDIO | GPIO 52 |
+| Ethernet Power | GPIO 51 |
 
-| Command | Page |
-| --- | --- |
-| `tela:0` | Clock, date and interface status |
-| `tela:1` | Wi-Fi SSID, IP, gateway, RSSI and signal bars |
-| `tela:2` | Ethernet status, IP, gateway, disconnect count and offline time |
-| `tela:3` | CPU, free/minimum heap, SD mount status and uptime |
-| `tela:4` | Gateway RTT for each interface, timeout percentage and history graph |
-| `tela:5` | Four most recent connection events, timestamped since boot |
-| `tela:next` | Advance one page and stop automatic rotation |
-| `tela:auto` | Resume rotation every eight seconds |
-| `net_monitor` | Retrieve network statistics and recent events via UDP |
+See `DeviceConfig.h` for the authoritative hardware configuration.
 
-A command or network log temporarily displays the original console for five
-seconds. File transfer progress keeps the terminal visible until completion.
-Selecting a page takes effect immediately on the next display refresh.
+---
 
-## Physical button
+## Software Requirements
 
-GPIO 2, wired to ground with INPUT_PULLUP:
+You will need:
 
-- Short press and release: advance one page, disabling automatic rotation.
-- Hold for five seconds, then release: clear saved Wi-Fi settings and restart.
+- **Arduino IDE** or another Arduino-compatible workflow
+- **ESP32 board support package** with ESP32-P4 support
+- Required libraries such as:
+  - Adafruit SSD1306
+  - Adafruit GFX
+  - SD_MMC
+  - WiFi / Ethernet support from the ESP32 core
 
-The `reset_wifi` command still clears Wi-Fi settings directly. The hardware EN
-reset button is independent of GPIO 2. Firmware and SD files are not erased by
-this settings operation.
+The firmware uses the native ESP-IDF ICMP implementation for gateway monitoring and does **not** require an additional ping library.
 
-## Measurements
+---
 
-The monitor uses the native ESP-IDF ICMP API, without an additional ping library.
-One asynchronous ping starts approximately every five seconds. With both links
-online, Wi-Fi and Ethernet alternate, giving each a sample approximately every
-ten seconds. With only one online, that interface is sampled every five seconds.
-Each request is bound to its interface and targets that interface's gateway.
-Timeout is one second. Bar height represents RTT on an adaptive scale; crosses
-represent unanswered pings. Each interface retains 24 results.
+## Quick Start
 
-A timeout can mean that the router filters ICMP; it does not establish that Wi-Fi
-or Ethernet disconnected and does not measure Internet reachability. Connection
-status, drops, offline duration and four recent events are observed by the main
-loop. Statistics are stored in RAM and reset on reboot. Existing blocking SD,
-LED and setup operations can delay observation of connection changes.
+1. Clone or download the repository.
+2. Open `wifi_Eth_SDCard.ino` in Arduino IDE.
+3. Keep all `.h` and `.cpp` files in the same sketch folder.
+4. Install the required libraries if needed.
+5. Select the appropriate ESP32-P4 board configuration.
+6. Compile and upload the firmware.
 
-Ethernet now starts even when no saved Wi-Fi network connects. UDP is also opened
-in AP mode. Network events are queued for processing in the main loop, avoiding
-OLED I2C access from the event task. Gateway ping callbacks only publish results.
-The existing Wi-Fi/Ethernet route priorities are applied as interfaces appear.
-NTP settings are loaded on startup so synchronization can also use Ethernet.
+If no saved Wi-Fi profile can be used, the device automatically starts its local AP portal.
 
-## UDP and installation
+---
 
-UDP port: **4210**. HTTP portal: `/`, `/info`, `/wifi`. Existing system, LED,
-time and SD commands remain available through `help`. Commands exceeding 254
-bytes are rejected before parsing; this fixes the original buffer overflow.
+## First Boot
 
-Extract the ZIP and open `wifi_Eth_SDCard/wifi_Eth_SDCard.ino`. Keep all headers
-and source files together, including the two new `NetworkMonitor` files.
+On startup, the firmware:
 
-Validation performed: source structure, local includes, command preservation,
-page integration and ZIP integrity. See the latest validation notes above for
-compilation and interface tests. Physical board tests remain pending.
-Recommended board checks: each page, both links together, cable disconnect,
-Wi-Fi disconnect, gateway filtering ICMP, AP-only boot, SD commands and short/
-long button presses.
+1. Initializes the OLED display.
+2. Mounts the SD card.
+3. Initializes the network subsystem.
+4. Attempts to connect to saved Wi-Fi profiles.
+5. Starts Ethernet support.
+6. Synchronizes time via NTP when available.
+7. Falls back to AP mode if no station connection is established.
 
-API references: [Espressif ICMP Echo](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/protocols/icmp_echo.html)
-and [ESP-NETIF interface index](https://docs.espressif.com/projects/esp-idf/en/release-v5.1/esp32/api-reference/network/esp_netif.html).
+When portal mode is active:
 
-## Version 1.5.1
+- **SSID:** `ESP32_P4_CONFIG`
+- **URL:** `http://192.168.4.1/`
 
-Network reports now show successful RTT minimum/mean/maximum and sample age.
-Timeouts are excluded from RTT averages. The HTTP `/info` page includes the
-network report. OLED latency graphs show the selected interface's sample age.
-LED blinking runs through the main loop without blocking network handling;
-`led_on`/`led_off` cancel blinking. Holding the GPIO 2 button no longer blocks
-network handling; releasing it after five seconds performs the Wi-Fi reset.
-Single quotes are escaped in configuration page HTML attributes.
+---
 
-## Modern local portal — 1.6.0
+## Usage
 
-Responsive `/info` and `/wifi` pages use self-contained styling and scripts.
-Information cards show both links, system health, saved profiles and connection
-history. The five-profile editor provides show/hide controls, active profile
-badges and an explicit open-network option without exposing stored passwords.
+The firmware is built around three primary interaction surfaces:
 
-The server validates the complete submission, verifies Preferences readback and
-schedules restart only after success. Failed writes trigger a verified attempt
-to restore the old profiles, with a visible error and no scheduled restart.
-Multi-key updates are not power-loss atomic. Existing UDP commands are retained.
+### OLED Dashboard
+Provides immediate visibility into system state and rotates through multiple pages automatically.
 
-## Comandos — 1.7.0
+### Web Portal
+Use the browser portal to inspect device status and manage Wi-Fi connectivity.
 
-Novos comandos: `wifi_add`, `wifi_list`, `wifi_status`, `eth_status`, `channel`,
-`chip_info`, `heap_min`, `psram`, `health`, `selftest`, `ntp_status`, `sd_append`,
-`sd_mkdir`, `sd_rmdir`; aliases `init` e `flash_info`. `net_info` inclui gateways,
-máscaras e DNS de ambas as interfaces. Credenciais Wi-Fi são ocultadas dos logs.
-`help` e `COMANDOS.md` foram atualizados; consulte o Markdown para sintaxe, exemplos
-e os comandos anteriores. `set_fuso` aceita somente inteiros -12..14; `dst` somente
-0 ou 1. Compile e teste na placa antes de usar esta versão.
+### UDP Command Interface
+Send commands to UDP port **4210** for diagnostics, monitoring, and remote control.
+
+---
+
+## OLED Display Pages
+
+The OLED dashboard includes six pages:
+
+1. **Clock**
+   - Date and time
+   - Wi-Fi and Ethernet status summary
+
+2. **Wi-Fi**
+   - SSID
+   - IP address
+   - Gateway
+   - RSSI
+   - Channel
+
+3. **Ethernet**
+   - Link status
+   - IP address
+   - Gateway
+   - Drop count
+   - Offline duration
+
+4. **System / SD**
+   - Chip information
+   - Free and minimum memory
+   - SD card status
+   - Uptime
+
+5. **Gateway Ping**
+   - Per-interface gateway latency
+   - Response history
+   - Timeout visualization
+
+6. **Network History**
+   - Recent connection events
+
+### Button Behavior
+
+- **Short press and release**: advance to the next page
+- **Press and hold for 5 seconds, then release**: clear saved Wi-Fi settings and restart
+
+---
+
+## Web Portal
+
+The firmware provides a local HTTP portal with the following endpoints:
+
+- `/`
+- `/info`
+- `/wifi`
+
+The portal is intended for:
+- viewing system and network status,
+- configuring Wi-Fi credentials,
+- and recovering the device when station mode is not available.
+
+It is self-contained and works directly from a browser on the local network.
+
+---
+
+## UDP Command Interface
+
+The firmware listens for UDP commands on port **4210**.
+
+### Highlights
+
+- Commands are case-insensitive
+- Arguments preserve their original case
+- Maximum command length is **254 bytes**
+- Responses are sent back to the sender's IP and port
+
+### Common Commands
+
+- `help`
+- `info`
+- `status`
+- `version`
+- `build`
+- `reason`
+- `alive`
+- `uptime`
+- `net_info`
+- `net_monitor`
+- `wifi_status`
+- `eth_status`
+- `reboot`
+
+For the full command reference, see `COMANDOS.md`.
+
+---
+
+## Storage and Logging
+
+When an SD card is available, the firmware stores operational logs locally.
+
+### Logging Behavior
+
+- timestamped entries when time is available
+- fallback label when time is not synchronized yet
+- serial mirroring of key log messages for easier debugging
+
+This makes it easier to inspect device behavior after deployment without depending on cloud telemetry.
+
+---
+
+## Network Monitoring
+
+The project includes active monitoring of network health and link quality.
+
+### It Tracks
+
+- gateway round-trip time
+- timeouts
+- online/offline state
+- interface-specific measurements
+- connection drops
+- recent network events
+
+### Why This Matters
+
+A timeout does not always mean the network is down. It may also indicate:
+- ICMP filtering by the gateway,
+- temporary congestion,
+- or a transient routing issue.
+
+This monitoring layer makes those conditions visible directly on the device.
+
+---
+
+## Architecture
+
+The firmware is organized into focused modules so the system stays maintainable and easy to extend:
+
+- **Main orchestration** — boot flow, button handling, and loop tasks
+- **Network controller** — Wi-Fi, Ethernet, portal routing, and network setup
+- **OLED display manager** — page rendering and dashboard updates
+- **Storage manager** — SD card detection and log persistence
+- **Command handler** — UDP parsing and remote command execution
+- **Portal UI** — local HTML/CSS for the built-in browser portal
+
+This separation makes it easier to evolve the project without turning the codebase into a single monolithic sketch.
+
+---
+
+## Project Structure
+
+Typical project files include:
+
+- `wifi_Eth_SDCard.ino` — main firmware entry point
+- `DeviceConfig.h` — hardware and pin definitions
+- `NetworkController.*` — network logic and portal handling
+- `OledDisplay.*` — OLED UI pages
+- `StorageManager.*` — SD card and logging support
+- `SlaveCommandHandler.*` — UDP command processing
+- `PortalUi.h` — local portal markup and styling
+
+---
+
+## Documentation
+
+Additional project documentation included in the repository:
+
+- `LEIA-ME.md` — original Portuguese documentation
+- `COMANDOS.md` — full command reference
+- `README.md` — English project overview
+
+---
+
+## Suggested Next Steps
+
+To take this project even further, strong next improvements would be:
+
+- adding real hardware photos and wiring diagrams,
+- documenting ESP32-P4 board selection in more detail,
+- publishing a full English command table,
+- adding GitHub Actions badges for build validation,
+- including a `docs/` folder with setup references,
+- and adding a contribution guide for external collaborators.
+
+---
+
+## Contributing
+
+Contributions are welcome.
+
+Useful areas for contribution include:
+- documentation improvements,
+- clearer hardware setup notes,
+- additional status pages,
+- portal UX refinements,
+- and expanded command documentation.
+
+---
+
+## License
+
+No license file is currently included in this repository.
+
+If you plan to distribute or reuse this project, consider adding a license such as:
+
+- MIT
+- Apache 2.0
+- BSD-3-Clause
+
+---
+
+## Author
+
+Built for an ESP32-P4-based embedded networking and monitoring setup.
