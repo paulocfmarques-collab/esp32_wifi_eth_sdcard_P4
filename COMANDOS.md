@@ -1,8 +1,27 @@
-# Comandos — ESP32-P4 v1.7.0
+# Comandos — ESP32-P4 v1.11.0
 
-Envie por UDP à porta **4210**. O firmware responde ao IP e à porta do remetente.
+Envie por UDP à porta **4210**, pela serial a **115200 baud** ou pelo terminal
+web em `/info`. O firmware responde pelo canal de origem. Na serial, termine
+cada comando com LF, CR ou CRLF e aguarde o fim da inicialização.
 Limite: **254 bytes por comando**. Nomes não distinguem maiúsculas/minúsculas;
 argumentos preservam a caixa. Arquivos SD podem gerar várias respostas UDP.
+
+## Proteção do OLED
+
+| Comando | Função |
+|---|---|
+| `protetor:on` | Inicia a proteção imediatamente sem alterar a opção automática. |
+| `protetor:off` | Desabilita a proteção automática e acorda a tela. |
+| `protetor:auto` | Habilita a proteção automática com o tempo atualmente configurado. |
+| `protetor:wake` | Acorda o OLED e reinicia a contagem de inatividade. |
+| `protetor:status` | Consulta o estado sem acordar o display. |
+| `protetor:tempo:120` | Ajusta a espera para 120 segundos e habilita a proteção automática. |
+| `botao_status` | Mostra o GPIO configurado e sua leitura LOW/HIGH para diagnóstico do botão. |
+
+Tempo aceito: inteiro de 15 a 3600 segundos. Padrão ao reiniciar: 60 segundos.
+Após a ativação, o relógio se move com brilho reduzido por quatro minutos; depois
+o OLED apaga. As opções não são gravadas em memória permanente. O primeiro toque
+curto no botão acorda sem mudar a página; um segundo toque avança normalmente.
 
 ## Sistema
 
@@ -15,6 +34,9 @@ argumentos preservam a caixa. Arquivos SD podem gerar várias respostas UDP.
 | `build` | Data e hora da compilação. | `build` |
 | `reason` | Motivo do último reset. | `reason` |
 | `alive` | Responde ALIVE. | `alive` |
+| `cores` | Core de execução, tarefa serial e ocupação da fila. | `cores` |
+| `ota_info` | Serviço OTA, porta e tamanho da partição. | `ota_info` |
+| `ota_password` | Mostra usuário/senha OTA somente na serial local. | `ota_password` |
 | `uptime` | Tempo ligado em milissegundos. | `uptime` |
 | `lastcmd` | Último comando; credenciais ficam ocultas. | `lastcmd` |
 | `cmdcount` | Total de comandos, exceto lastcmd/cmdcount. | `cmdcount` |
@@ -163,3 +185,16 @@ ser bloqueio de ICMP. Estatísticas do monitor ficam em RAM e reiniciam no boot.
 `health` e `selftest` consultam estados já disponíveis; não testam escrita no SD
 nem garantem a integridade física do hardware. Algumas operações SD continuam
 bloqueantes e podem atrasar telas e monitor.
+
+## Serial USB e terminal web (v1.8.0)
+
+Todos os comandos deste documento também funcionam na serial, a **115200 baud**,
+e no terminal da página `/info`. Na serial, envie uma linha por comando com final
+LF, CR ou CRLF. Aguarde o fim da inicialização da placa. Limite: **254 bytes**.
+Para a porta USB nativa, habilite **USB CDC On Boot** conforme a configuração da placa.
+
+As respostas são enviadas ao canal de origem. No terminal web, respostas acima
+de 8 KB são truncadas com um aviso; use `sd_tail` para consultar arquivos grandes.
+O terminal pede confirmação para comandos que alteram arquivos/configurações.
+Se a conexão cair, verifique o estado antes de repetir um comando de escrita.
+

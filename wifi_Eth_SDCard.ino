@@ -10,9 +10,19 @@ StorageManager storage;
 NetworkController network(oled, storage);
 TimeManager localTime(oled);
 SlaveCommandHandler cmdHandler(oled, storage, network, localTime);
+static TaskHandle_t applicationTask = nullptr;
+void executarCiclo();
+static void applicationLoop(void*) {
+  Serial.println("[CORES] Web, UDP, OLED, SD e OTA no core " + String(xPortGetCoreID()) + ".");
+  for (;;) { executarCiclo(); vTaskDelay(1); }
+}
 
 void setup() {
   Serial.begin(115200);
+  cmdHandler.iniciarSerial();
+  network.setCommandHandler([](String command) {
+    cmdHandler.executar(command, NetworkController::CommandChannel::HTTP);
+  });
   delay(500); 
 
   pinMode(LED_PIN, OUTPUT);
@@ -50,10 +60,21 @@ void setup() {
   } else {
     network.iniciarPortal();
   }
+  if (xTaskCreatePinnedToCore(applicationLoop, "device_app", 12288, nullptr, 1, &applicationTask, 1) != pdPASS) {
+    applicationTask = nullptr;
+    Serial.println(F("[CORES] Falha ao criar tarefa principal; usando loop Arduino."));
+  }
 }
 
 void loop() {
+  if (!applicationTask) executarCiclo();
+  delay(10);
+}
+
+void executarCiclo() {
   network.processarPortalERedes();
+  if (network.atualizacaoEmCurso()) return;
+  cmdHandler.processarSerial();
   cmdHandler.atualizar();
 
   oled.atualizarPainel(localTime, network, storage);
@@ -76,15 +97,16 @@ void loop() {
 
   // Short press: next page. Hold five seconds: clear saved Wi-Fi settings.
   static bool resetArmed = false;
+  static bool wakeOnly = false;
   static int readingBefore = HIGH, stable = HIGH;
   static uint32_t changedAt = 0, pressedAt = 0;
   int reading = digitalRead(BOTAO_RESET);
   if (reading != readingBefore) changedAt = millis();
   if (millis() - changedAt >= 50 && reading != stable) {
     stable = reading;
-    if (stable == LOW) { pressedAt = millis(); resetArmed = false; }
+    if (stable == LOW) { pressedAt = millis(); resetArmed = false; wakeOnly = oled.acordar(); }
     else if (resetArmed || millis() - pressedAt >= 5000) network.zerarConfiguracoes();
-    else oled.avancarPagina();
+    else if (!wakeOnly) oled.avancarPagina();
   }
   readingBefore = reading;
   if (stable == LOW && !resetArmed && millis() - pressedAt >= 5000) {

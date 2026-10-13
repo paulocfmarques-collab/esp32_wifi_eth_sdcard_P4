@@ -12,6 +12,7 @@
 #include "NetworkMonitor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "FirmwareUpdater.h"
 
 #define NUM_REDES 5
 
@@ -19,6 +20,7 @@ class NetworkController {
 private:
   QueueHandle_t _networkEvents = nullptr;
   NetworkMonitor _monitor;
+  FirmwareUpdater _firmware;
   WebServer _server;
   WiFiUDP _udp;
   Preferences _prefs;
@@ -31,6 +33,9 @@ private:
   uint32_t _restartAt = 0;
   String _tmpS[NUM_REDES];
   String _tmpP[NUM_REDES];
+  void (*_commandHandler)(String) = nullptr;
+  String _httpResponse;
+  bool _httpTruncated = false;
 
   static void onNetworkEvent(arduino_event_id_t event, arduino_event_info_t info);
   static void handleRootCallback() { if (_instance) _instance->handleRoot(); }
@@ -42,11 +47,21 @@ private:
   void handleSave();
   void handleInfo();
   void handleWifi();
+  void handleCommand();
+  void handleLogs();
+  void handleLogData();
   void configurarRotas();
   bool tentarRede(const String& ssid, const String& senha);
   void carregarRedes(String ssids[NUM_REDES], String senhas[NUM_REDES], int& idx);
 
 public:
+  enum class CommandChannel { UDP, ConsoleSerial, HTTP };
+  CommandChannel commandChannel = CommandChannel::UDP;
+  void setCommandHandler(void (*handler)(String)) { _commandHandler = handler; }
+  void agendarReinicio() { _restartAt = millis() + 1500; _dadosProntosParaSalvar = true; }
+  bool atualizacaoEmCurso() const { return _firmware.busy(); }
+  String statusOTA() const { return _firmware.status(); }
+  void imprimirCredenciaisOTA() const { _firmware.imprimirCredenciais(); }
   static bool ethConectado;
 
   NetworkController(OledDisplay& oledRef, StorageManager& storageRef);

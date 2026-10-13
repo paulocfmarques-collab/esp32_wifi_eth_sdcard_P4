@@ -108,10 +108,17 @@ bool NetworkController::conectarWifi() {
 
 void NetworkController::configurarRotas() {
   if (_rotasOk) return;
+  const char* headers[] = {"X-ESP32-Command", "X-ESP32-Firmware"};
+  _server.collectHeaders(headers, 2);
   _server.on("/", HTTP_GET, handleRootCallback);
   _server.on("/info", HTTP_GET, handleInfoCallback);
   _server.on("/wifi", HTTP_GET, handleWifiCallback);
   _server.on("/salvar", HTTP_POST, handleSaveCallback);
+  _server.on("/api/dashboard", HTTP_GET, [this]() { handleInfo(); });
+  _server.on("/api/command", HTTP_POST, [this]() { handleCommand(); });
+  _server.on("/logs", HTTP_GET, [this]() { handleLogs(); });
+  _server.on("/api/logs", HTTP_GET, [this]() { handleLogData(); });
+  _firmware.begin(_server, _oled);
   _server.begin();
   _rotasOk = true;
 }
@@ -134,6 +141,73 @@ static String infoRow(const char* title, const String& value) {
 }
 static String metric(const char* title, const String& value, const char* hint) {
  return "<article class='card'><div class='label'>" + String(title) + "</div><div class='value'>" + esc(value) + "</div><small>" + String(hint) + "</small></article>";
+}
+
+void NetworkController::handleLogs() {
+ String h = portalStart("Log do dispositivo", false, true);
+ h += FPSTR(PORTAL_LOGS);
+ h += portalEnd();
+ _server.sendHeader("Cache-Control", "no-store");
+ _server.send(200, "text/html; charset=utf-8", h);
+}
+
+static String logJson(const String& value) {
+ String out; out.reserve(value.length() + 64); out += '"';
+ const char hex[] = "0123456789abcdef";
+ for (size_t i = 0; i < value.length(); ++i) {
+   unsigned char c = value[i];
+   if (c == '"' || c == '\\') { out += '\\'; out += char(c); }
+   else if (c < 32) { out += "\\u00"; out += hex[c >> 4]; out += hex[c & 15]; }
+   else out += char(c);
+ }
+ out += '"'; return out;
+}
+
+void NetworkController::handleLogData() {
+ _server.sendHeader("Cache-Control", "no-store");
+ auto error = [this](int code, const char* message) {
+   _server.send(code, "application/json; charset=utf-8", "{\"error\":" + logJson(message) + "}");
+ };
+ if (_firmware.busy() || _dadosProntosParaSalvar) { error(503, "Atualização ou reinício em andamento. Aguarde."); return; }
+ if (!_storage.isAtivo()) { error(503, "Cartão SD indisponível."); return; }
+ int wanted = 100;
+ if (_server.hasArg("lines")) {
+   const String arg = _server.arg("lines");
+   if (arg != "25" && arg != "100" && arg != "250") { error(400, "Escolha 25, 100 ou 250 linhas."); return; }
+   wanted = arg.toInt();
+ }
+ File file = SD_MMC.open("/log.txt", FILE_READ);
+ if (!file) { error(404, "O arquivo /log.txt ainda não existe ou não pode ser aberto."); return; }
+ if (file.isDirectory()) { file.close(); error(400, "/log.txt não é um arquivo."); return; }
+ const uint32_t total = file.size();
+ const uint32_t offset = total > 8192 ? total - 8192 : 0;
+ if (!file.seek(offset)) { file.close(); error(500, "Não foi possível posicionar a leitura do log."); return; }
+ String text;
+ if (!text.reserve(total - offset + 1)) { file.close(); error(500, "Memória insuficiente para ler o log."); return; }
+ uint8_t buffer[256]; uint32_t remaining = total - offset;
+ while (remaining) {
+   int n = file.read(buffer, min(remaining, uint32_t(sizeof(buffer))));
+   if (n <= 0) { file.close(); error(500, "Leitura do cartão SD interrompida."); return; }
+   if (!text.concat(reinterpret_cast<const char*>(buffer), n)) { file.close(); error(500, "Memória insuficiente para o log."); return; }
+   remaining -= n;
+ }
+ file.close();
+ if (offset) {
+   int newline = text.indexOf('\n');
+   if (newline >= 0 && newline + 1 < int(text.length())) text.remove(0, newline + 1);
+   else while (text.length() && (uint8_t(text[0]) & 0xc0) == 0x80) text.remove(0, 1);
+ }
+ int start = 0, found = 0;
+ for (int i = int(text.length()) - 1; i >= 0; --i) {
+   if (text[i] == '\n' && i != int(text.length()) - 1 && ++found == wanted) { start = i + 1; break; }
+ }
+ if (start) text.remove(0, start);
+ unsigned lines = 0;
+ for (size_t i = 0; i < text.length(); ++i) if (text[i] == '\n') ++lines;
+ if (text.length() && !text.endsWith("\n")) ++lines;
+ String json = "{\"text\":" + logJson(text) + ",\"size\":" + String(total) +
+   ",\"lines\":" + String(lines) + ",\"limited\":" + String(offset || start ? "true" : "false") + "}";
+ _server.send(200, "application/json; charset=utf-8", json);
 }
 void NetworkController::handleWifi() {
  String ssids[NUM_REDES], senhas[NUM_REDES]; int idx;
@@ -164,7 +238,9 @@ void NetworkController::handleInfo() {
  carregarRedes(ssids,senhas,idx);
  bool wifi=WiFi.status()==WL_CONNECTED; uint32_t seg=millis()/1000;
  String uptime=String(seg/3600)+"h "+String((seg/60)%60)+"m";
- String h=portalStart("Informações",false,true);
+ const bool fragment = _server.uri() == "/api/dashboard";
+ String h=fragment ? String() : portalStart("Informações",false);
+ h += F("<section id='dashboard'>");
  h += F("<div class='top'><div><div class='eyebrow'>Visão geral</div><h1>Seu dispositivo, ao vivo.</h1><p class='muted'>Conexões, desempenho e histórico em um só lugar.</p></div><a class='button' href='/wifi'>Configurar redes</a></div><div class='grid metrics'>");
  h += metric("Wi-Fi",wifi?String("Conectado"):String("Offline"),"Rede sem fio");
  h += metric("Ethernet",ethConectado?String("Conectado"):String("Offline"),"Conexão por cabo");
@@ -187,6 +263,7 @@ void NetworkController::handleInfo() {
  h+=F("<article class='card'><h2>Dispositivo</h2>");
  h+=infoRow("Processador",String(ESP.getChipModel())+" · rev "+String(ESP.getChipRevision()));
  h+=infoRow("Frequência",String(ESP.getCpuFreqMHz())+" MHz");h+=infoRow("Menor heap livre",String(ESP.getMinFreeHeap()/1024)+" KB");
+ h+=infoRow("Core do painel",String(xPortGetCoreID())+" · consulte cores no terminal");
  h+=infoRow("Cartão SD",_storage.isAtivo()?String("Disponível"):String("Indisponível"));
  h+=infoRow("Console UDP",String(UDP_PORTA));h+="</article><article class='card'><h2>Redes salvas</h2>";
  bool any=false;
@@ -195,8 +272,32 @@ void NetworkController::handleInfo() {
  h+=F("</article><article class='card full'><h2>Histórico de conexão</h2>");
  bool events=false;for(const auto& e:_monitor.events)if(e.length()){events=true;h+="<div class='event'>"+esc(e)+"</div>";}
  if(!events)h+=F("<p class='muted'>Aguardando eventos de rede.</p>");
- h+=F("<p class='hint'>Tempos desde o boot. O histórico reinicia com a placa. Um ping sem resposta pode indicar bloqueio de ICMP.</p></article></div><p class='hint section'>Atualização automática a cada 10 segundos.</p>");
- h+=portalEnd();_server.send(200,"text/html; charset=utf-8",h);
+ h+=F("<p class='hint'>Tempos desde o boot. O histórico reinicia com a placa. Um ping sem resposta pode indicar bloqueio de ICMP.</p></article></div></section>");
+ if (!fragment) { h += FPSTR(PORTAL_CONSOLE); h += portalEnd(); }
+ _server.sendHeader("Cache-Control", "no-store");
+ _server.send(200,"text/html; charset=utf-8",h);
+}
+
+void NetworkController::handleCommand() {
+  _server.sendHeader("Cache-Control", "no-store");
+  // A custom header prevents cross-origin HTML forms from invoking commands.
+  if (!_server.hasArg("cmd") || _server.header("X-ESP32-Command") != "1") {
+    _server.send(400, "text/plain; charset=utf-8", "Requisicao de comando invalida\n"); return;
+  }
+  if (_dadosProntosParaSalvar || _firmware.busy()) {
+    _server.send(409, "text/plain; charset=utf-8", "Reinicio em andamento\n"); return;
+  }
+  String cmd = _server.arg("cmd");
+  if (cmd.isEmpty() || cmd.length() > 254 || cmd.indexOf('\r') >= 0 || cmd.indexOf('\n') >= 0) {
+    _server.send(400, "text/plain; charset=utf-8", "Envie um comando de ate 254 bytes, sem quebras de linha\n"); return;
+  }
+  if (!_commandHandler) { _server.send(503, "text/plain", "Console indisponivel\n"); return; }
+  _httpResponse = "";
+  _httpTruncated = false;
+  _commandHandler(cmd);
+  if (_httpTruncated) _httpResponse += "\n[Resposta limitada a 8 KB. Use sd_tail para arquivos grandes.]\n";
+  _server.send(200, "text/plain; charset=utf-8", _httpResponse);
+  _httpResponse = "";
 }
 
 void NetworkController::handleRoot() {
@@ -211,7 +312,7 @@ void NetworkController::handleSave() {
   h+=success?String("<p>Após o reinício, acesse o novo IP do dispositivo. Se nenhuma rede conectar, use o AP ESP32_P4_CONFIG.</p>"):String("<a class='button' href='/wifi'>Voltar às redes</a>");
   h+="</div>"+portalEnd();_server.send(code,"text/html; charset=utf-8",h);
  };
- if(_dadosProntosParaSalvar){message(409,"Reinício em andamento","Aguarde o dispositivo reiniciar.",false);return;}
+ if(_dadosProntosParaSalvar || _firmware.busy()){message(409,"Atualização ou reinício em andamento","Aguarde o dispositivo reiniciar.",false);return;}
  String oldS[NUM_REDES],oldP[NUM_REDES];int oldIdx;
  carregarRedes(oldS,oldP,oldIdx);
  for(int i=0;i<NUM_REDES;i++) {
@@ -273,6 +374,7 @@ void NetworkController::processarPortalERedes()
   configurarPrioridadeDeRede();
   _monitor.update(WiFi.status() == WL_CONNECTED, ethConectado);
   _server.handleClient();
+  if (!_dadosProntosParaSalvar) _firmware.handle();
   if (_dadosProntosParaSalvar && int32_t(millis()-_restartAt)>=0) ESP.restart();
 }
 
@@ -288,6 +390,13 @@ void NetworkController::configurarPrioridadeDeRede()
 
 void NetworkController::responderUDP(const String& msg) 
 {
+  if (commandChannel == CommandChannel::ConsoleSerial) { Serial.print(msg); return; }
+  if (commandChannel == CommandChannel::HTTP) {
+    const size_t remaining = 8192 - _httpResponse.length();
+    if (msg.length() > remaining) _httpTruncated = true;
+    _httpResponse += msg.substring(0, remaining);
+    return;
+  }
   if (_udp.remoteIP()) {
     _udp.beginPacket(_udp.remoteIP(), _udp.remotePort());
     _udp.print(msg);
@@ -300,11 +409,7 @@ void NetworkController::zerarConfiguracoes()
   _oled.adicionarLinha("Limpando Memoria...");
   _prefs.begin("wifi", false); _prefs.clear(); _prefs.end();
   responderUDP("WiFi zerado. Reiniciando...\n");
-  for (int i = 0; i < 10; i++) {
-    digitalWrite(LED_PIN, HIGH); delay(100);
-    digitalWrite(LED_PIN, LOW); delay(100);
-  }
-  ESP.restart();
+  agendarReinicio();
 }
 
 void NetworkController::ativarEthernetFisica() 

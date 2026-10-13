@@ -25,7 +25,7 @@ void StorageManager::gravarLog(const String& mensagem) {
   struct tm timeinfo;
   char bufferCarimbo[25]; 
   
-  if (getLocalTime(&timeinfo)) {
+  if (getLocalTime(&timeinfo, 10)) {
     sprintf(bufferCarimbo, "[%02d/%02d/%04d %02d:%02d:%02d] ",
             timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900,
             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);

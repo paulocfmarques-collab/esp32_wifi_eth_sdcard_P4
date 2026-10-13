@@ -15,6 +15,12 @@ private:
   uint8_t _pagina = 0;
   bool _autoPaginas = true;
   uint32_t _ultimaPagina = 0, _ultimoPainel = 0, _consoleAte = 0;
+  bool _protecaoHabilitada = true, _protecaoAtiva = false, _telaApagada = false;
+  uint32_t _ultimaInteracao = 0, _tempoProtecao = 60000, _ultimoQuadroProtecao = 0;
+  int16_t _protecaoX = 40, _protecaoY = 28;
+  int8_t _protecaoDx = 1, _protecaoDy = 1;
+  bool atualizarProtecao(TimeManager& hora, uint32_t now);
+  void desenharProtecao(TimeManager& hora, uint32_t now);
 
   
   // Reduzido para 5 linhas móveis para sobrar espaço para a barra de progresso na base
@@ -37,7 +43,12 @@ public:
   void paginasAutomaticas();
   void atualizarPainel(TimeManager& hora, NetworkController& rede, StorageManager& sd);
 
-  void adicionarLinha(const String& novoTexto);
+  void adicionarLinha(const String& novoTexto, bool interacao = true);
+  bool acordar();
+  bool iniciarProtecao();
+  void habilitarProtecao(bool habilitada);
+  void configurarTempoProtecao(uint32_t segundos);
+  String statusProtecao() const;
   void atualizarRelogioSuperior(TimeManager& timeRef);
   
   // Novo: Ativa ou desativa a barra gráfica inferior

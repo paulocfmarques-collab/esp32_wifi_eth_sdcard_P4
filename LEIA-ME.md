@@ -1,7 +1,115 @@
 # ESP32-P4 — Monitor de rede com OLED
 
-Versão 1.7.0 do projeto Wi-Fi, Ethernet e cartão SD. Esta atualização acrescenta
-seis telas e monitoramento de rede, preservando os comandos existentes.
+Versão 1.11.0 do projeto Wi-Fi, Ethernet e cartão SD. Inclui página de log, seis telas OLED,
+proteção de tela, monitoramento de rede, dois cores, serial, terminal web e OTA.
+
+## Leitura do log pela página web
+
+No menu, abra **Log do dispositivo**, ou acesse `/logs` no endereço IP da placa.
+A página lê `/log.txt` do cartão SD. Escolha 25, 100 ou 250 linhas e clique em
+**Atualizar agora**. A opção automática consulta a cada cinco segundos e pausa
+quando a aba está oculta. A busca filtra apenas o trecho carregado; desmarque
+**Acompanhar o final** para ler sem rolar automaticamente.
+
+São lidos no máximo os últimos 8 KB, sem percorrer o arquivo inteiro. Um aviso
+indica quando o trecho foi limitado. As consultas não aumentam o arquivo de log
+nem acordam o OLED. Falhas de cartão, arquivo ausente e OTA em andamento aparecem
+na página; leituras antigas permanecem visíveis com aviso de desatualização.
+
+## Proteção de tela
+
+Na Waveshare ESP32-P4-WIFI6, os dois botões da placa são **BOOT** e **RST**.
+O RST reinicia o microcontrolador por hardware; não pode ser usado como botão
+de despertar por software. O GPIO 2 do projeto espera um **botão externo ligado
+entre GPIO 2 e GND**, com `INPUT_PULLUP`. O BOOT usa GPIO 35, compartilhado com
+Ethernet TXD1; não foi remapeado para não prejudicar a rede.
+Use **Acordar tela** no terminal web ou `protetor:wake` pela serial/UDP.
+O comando `botao_status` mostra o GPIO configurado e sua leitura: HIGH solto,
+LOW pressionado. Se ela não mudar ao apertar o botão externo, confira a ligação.
+Referência da placa: https://docs.waveshare.com/ESP32-P4-WIFI6.
+
+Após **60 segundos sem interação**, o OLED reduz o brilho e mostra um relógio
+que se desloca pela tela. Após **mais 4 minutos**, o controlador apaga o OLED.
+O ESP32 continua atendendo a rede, a serial e os demais serviços.
+
+O primeiro toque curto no botão acorda a tela mantendo a página. O próximo toque
+troca a página normalmente. Comandos usuais e eventos de conexão que aparecem no
+OLED também acordam o display. A rotação das páginas e a atualização automática
+do painel web não reiniciam o contador. Transferências e OTA mantêm o progresso
+visível. O pressionamento longo de cinco segundos continua limpando o Wi-Fi.
+
+Pela serial, UDP ou terminal web, use `protetor:on` para iniciar agora,
+`protetor:wake` para acordar, `protetor:off` para desabilitar a ativação automática
+e `protetor:auto` para habilitá-la. `protetor:tempo:120` altera a espera para dois
+minutos; são aceitos inteiros de **15 a 3600 segundos**. `protetor:status` consulta
+o estado sem acordar a tela. As configurações são temporárias: ao reiniciar,
+volta o padrão automático de 60 segundos. A proteção manual não altera a opção
+de ativação automática. Nenhum acesso ao OLED foi transferido para o core 0.
+
+Teste na placa: aguarde 60 segundos para conferir relógio e brilho; aguarde mais
+quatro minutos para apagar; pressione o botão uma vez para acordar sem mudar a
+página; confira os comandos e o progresso durante uma transferência/OTA.
+
+## Dois cores e atualização de firmware
+
+O core 0 recebe a serial e coloca comandos em uma fila de oito posições. O core 1
+executa comandos e cuida de web, UDP, SD, OLED e OTA. Não há acesso simultâneo ao
+SD/OLED pelas duas tarefas. Use `cores` para conferir o core de execução e a fila.
+Se a fila encher, comandos inteiros são descartados, com aviso na serial.
+
+Para atualizar pelo navegador, abra `/firmware`, entre como `admin` e use a senha
+indicada na serial por `[OTA]`. Ela é gerada por dispositivo e permanece salva.
+Envie `ota_password` pela serial para consultá-la novamente; esse comando não
+revela a senha pelo navegador ou UDP. Se não for possível guardar/verificar a
+senha, OTA fica desabilitado.
+
+Para atualizar pelo Arduino IDE, selecione a porta de rede `esp32-p4-node` e use
+a mesma senha. O serviço usa a porta 3232 e descoberta mDNS na rede local.
+`ota_info` informa o estado do serviço e o tamanho disponível na partição OTA.
+
+Instale esta versão primeiro por **USB** com uma tabela que tenha `otadata` e dois
+slots de aplicativo. Depois envie o `.bin` do aplicativo, compilado para a mesma
+placa/configuração, pela rede. Não envie bootloader, partições ou imagem merged.
+A tabela padrão de 4 MB oferece 1.310.720 bytes por aplicativo; se necessário,
+escolha outra tabela que caiba na flash real da placa. OTA não muda as partições.
+
+O navegador mostra o progresso. O firmware exige autenticação, limita o tamanho,
+confere o fim da transferência e só ativa a imagem depois de verificá-la.
+Transferências incompletas não substituem a partição em execução. Durante OTA,
+a execução dos comandos fica suspensa; a recepção serial continua com fila limitada.
+Mantenha a alimentação. Use em rede local confiável. Não há rollback automático
+se uma nova versão válida iniciar e depois falhar em execução.
+
+Validação: a versão **1.11.0** compilou para `ESP32P4 Dev Module` com Arduino ESP32
+**3.3.12**, usando **1.223.348 bytes (93%)** da partição padrão de 1.310.720 bytes.
+Os 20 testes automatizados das interfaces web passaram, incluindo log e despertar.
+A compilação usou as opções padrão; na instalação, escolha a revisão do chip,
+USB e flash reais da placa. Ainda não foram feitos testes físicos da proteção
+de tela nem gravação desta versão na placa.
+
+## Painel e comandos
+
+Abra `/info` no endereço IP da placa. Os cartões atualizam a cada cinco segundos
+sem recarregar a página. Use o botão para pausar ou retomar. O terminal abaixo dos
+cartões aceita os mesmos comandos do UDP, com atalhos para diagnóstico, LED, OLED
+e arquivos. As setas para cima/baixo percorrem o histórico. Senhas de `wifi_add`
+não aparecem na saída nem no histórico do terminal.
+
+No Monitor Serial, selecione **115200 baud** e final de linha **LF, CR ou CRLF**.
+Depois da inicialização, experimente `help`, `status`, `led_on` ou `sd_list`.
+Para USB nativo, habilite **USB CDC On Boot** conforme a configuração da placa;
+quando desabilitado, `Serial` mantém a UART configurada pelo Arduino.
+
+O limite é 254 bytes por comando. A serial descarta linhas grandes por inteiro.
+Respostas web têm limite de 8 KB, com aviso de truncamento: para arquivos grandes,
+use `sd_tail`. A página pede confirmação antes de alterar arquivos/configurações.
+Se perder a resposta, confira o estado antes de repetir operações de escrita.
+As respostas voltam ao canal de origem; logs de diagnóstico continuam na serial.
+Os reinícios por comando aguardam 1,5 segundo para entregar a resposta.
+
+Os scripts e estilos são locais e não dependem de acesso à Internet. O portal
+continua destinado a uma rede local confiável. Consulte `COMANDOS.md` para a lista
+completa de comandos. Leituras extensas no cartão SD ainda podem atrasar o painel.
 
 ## Hardware
 
@@ -108,8 +216,9 @@ medição para distinguir os links.
 ## Validação
 
 Foram revisados estrutura dos arquivos, includes locais, preservação dos comandos
-e pinos, integração das telas, limite UDP e integridade do ZIP. A compilação e os
-testes na placa ainda precisam ser realizados.
+e pinos, integração das telas, limite UDP e integridade do ZIP. Consulte as notas
+da versão atual para compilação e testes de interface. Os testes físicos na placa
+ainda precisam ser realizados.
 
 Teste as seis telas, Wi-Fi e Ethernet juntos e separados, retirada do cabo,
 perda de Wi-Fi, AP sem credenciais, comandos SD e toque/pressão longa do botão.

@@ -19,8 +19,9 @@ void OledDisplay::inicializar() {
   }
 }
 
-void OledDisplay::adicionarLinha(const String& novoTexto) {
+void OledDisplay::adicionarLinha(const String& novoTexto, bool interacao) {
   Serial.println("[OLED Log] " + novoTexto);
+  if (interacao) acordar();
   if (!_inicializado) return;
 
   if (_totalLinhas >= MAX_LINHAS_TERMINAL) {
@@ -34,10 +35,11 @@ void OledDisplay::adicionarLinha(const String& novoTexto) {
   }
 
   _consoleAte = millis() + 5000;
-  redesenharTelaCompleta(_ultimaHoraExibida);
+  if (!_protecaoAtiva && !_telaApagada) redesenharTelaCompleta(_ultimaHoraExibida);
 }
 
 void OledDisplay::configurarProgresso(bool ativar, int porcentagem) {
+  acordar();
   _exibirProgresso = ativar;
   _progressoAtual = constrain(porcentagem, 0, 100);
   if (_inicializado) {
@@ -47,7 +49,7 @@ void OledDisplay::configurarProgresso(bool ativar, int porcentagem) {
 }
 
 void OledDisplay::atualizarRelogioSuperior(TimeManager& timeRef) {
-  if (!_inicializado) return;
+  if (!_inicializado || _protecaoAtiva || _telaApagada) return;
   unsigned long agora = millis();
   if (agora - _ultimoRelogioRefresh >= 1000) {
     _ultimoRelogioRefresh = agora;
@@ -60,6 +62,7 @@ void OledDisplay::atualizarRelogioSuperior(TimeManager& timeRef) {
 }
 
 void OledDisplay::redesenharTelaCompleta(const String& horaAtual) {
+  if (!_inicializado || _protecaoAtiva || _telaApagada) return;
   _display.clearDisplay();
   _display.setTextSize(1);
   _display.setTextColor(SSD1306_WHITE);
@@ -100,13 +103,15 @@ void OledDisplay::redesenharTelaCompleta(const String& horaAtual) {
 }
 
 void OledDisplay::selecionarPagina(uint8_t pagina) {
+ acordar();
  _pagina=pagina;_autoPaginas=false;_consoleAte=0;_ultimoPainel=millis()-1000;
 }
 void OledDisplay::avancarPagina(){selecionarPagina((_pagina+1)%6);}
-void OledDisplay::paginasAutomaticas(){_autoPaginas=true;_ultimaPagina=millis();_consoleAte=0;_ultimoPainel=millis()-1000;}
+void OledDisplay::paginasAutomaticas(){acordar();_autoPaginas=true;_ultimaPagina=millis();_consoleAte=0;_ultimoPainel=millis()-1000;}
 void OledDisplay::atualizarPainel(TimeManager& hora,NetworkController& rede,StorageManager& sd) {
  if(!_inicializado)return;
  uint32_t now=millis();
+ if(atualizarProtecao(hora, now))return;
  if(_exibirProgresso || int32_t(_consoleAte-now)>0)return;
  if(now-_ultimoPainel<1000)return;_ultimoPainel=now;
  if(_autoPaginas && now-_ultimaPagina>=8000){_pagina=(_pagina+1)%6;_ultimaPagina=now;}
@@ -155,4 +160,85 @@ void OledDisplay::atualizarPainel(TimeManager& hora,NetworkController& rede,Stor
   }
  } else {for(int i=0;i<4;i++)line(i,m.events[i]);line(4,"Desde o boot (RAM)");}
  _display.display();
+}
+
+bool OledDisplay::acordar() {
+  const bool estavaProtegida = _protecaoAtiva || _telaApagada;
+  _ultimaInteracao = millis();
+  if (_inicializado && estavaProtegida) {
+    _display.ssd1306_command(SSD1306_DISPLAYON);
+    _display.dim(false);
+  }
+  _protecaoAtiva = _telaApagada = false;
+  if (estavaProtegida) {
+    _consoleAte = 0;
+    _ultimoPainel = millis() - 1000;
+    _ultimaPagina = millis();
+  }
+  return estavaProtegida;
+}
+
+bool OledDisplay::iniciarProtecao() {
+  if (!_inicializado || _exibirProgresso) return false;
+  acordar();
+  // Backdate activity so the same timers govern manual and automatic protection.
+  _ultimaInteracao = millis() - _tempoProtecao;
+  _protecaoAtiva = true;
+  _consoleAte = 0;
+  _ultimoQuadroProtecao = millis() - 1000;
+  _display.dim(true);
+  return true;
+}
+
+void OledDisplay::habilitarProtecao(bool habilitada) {
+  _protecaoHabilitada = habilitada;
+  acordar();
+}
+
+void OledDisplay::configurarTempoProtecao(uint32_t segundos) {
+  _tempoProtecao = segundos * 1000;
+  _protecaoHabilitada = true;
+  acordar();
+}
+
+String OledDisplay::statusProtecao() const {
+  return "Protecao automatica: " + String(_protecaoHabilitada ? "ON" : "OFF") +
+    "\nEstado: " + String(!_inicializado ? "OLED indisponivel" : _telaApagada ? "OLED apagado" : _protecaoAtiva ? "relogio em movimento" : "painel") +
+    "\nInatividade: " + String(_tempoProtecao / 1000) + " s\nOLED apaga 240 s depois de iniciar a protecao\n";
+}
+
+bool OledDisplay::atualizarProtecao(TimeManager& hora, uint32_t now) {
+  if (_exibirProgresso) return false;
+  const uint32_t parado = uint32_t(now - _ultimaInteracao);
+  if (!_protecaoAtiva && _protecaoHabilitada && parado >= _tempoProtecao) {
+    _protecaoAtiva = true;
+    _consoleAte = 0;
+    _ultimoQuadroProtecao = now - 1000;
+    _display.dim(true);
+  }
+  if (!_protecaoAtiva) return false;
+  if (!_telaApagada && parado >= _tempoProtecao + 240000UL) {
+    _display.clearDisplay();
+    _display.display();
+    _display.ssd1306_command(SSD1306_DISPLAYOFF);
+    _telaApagada = true;
+  }
+  if (!_telaApagada && uint32_t(now - _ultimoQuadroProtecao) >= 1000) desenharProtecao(hora, now);
+  return true;
+}
+
+void OledDisplay::desenharProtecao(TimeManager& hora, uint32_t now) {
+  _ultimoQuadroProtecao = now;
+  // Eight characters in the built-in 6x8 font; keep the entire clock on screen.
+  _protecaoX += _protecaoDx;
+  _protecaoY += _protecaoDy;
+  if (_protecaoX <= 0 || _protecaoX >= SCREEN_WIDTH - 48) _protecaoDx = -_protecaoDx;
+  if (_protecaoY <= 0 || _protecaoY >= SCREEN_HEIGHT - 8) _protecaoDy = -_protecaoDy;
+  _display.clearDisplay();
+  _display.setTextSize(1);
+  _display.setTextWrap(false);
+  _display.setTextColor(SSD1306_WHITE);
+  _display.setCursor(_protecaoX, _protecaoY);
+  _display.print(hora.obterApenasHora());
+  _display.display();
 }

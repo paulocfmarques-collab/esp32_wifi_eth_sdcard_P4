@@ -12,6 +12,8 @@
 
 // Periféricos locais da Placa
 #define LED_PIN       1
+// External user button between GPIO 2 and GND; NOT the board's RST button.
+// RST resets the MCU. BOOT (GPIO 35) shares Ethernet TXD1 on this board.
 #define BOTAO_RESET   2
 
 // Configurações Ethernet (ESP32-P4 DevKit com PHY IP101)
