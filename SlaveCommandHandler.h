@@ -6,7 +6,6 @@
 #include "StorageManager.h"
 #include "NetworkController.h"
 #include "TimeManager.h"
-#include "driver/temperature_sensor.h"
 #include <atomic>
 #include "freertos/task.h"
 

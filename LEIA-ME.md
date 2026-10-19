@@ -1,7 +1,87 @@
 # ESP32-P4 — Monitor de rede com OLED
 
-Versão 1.11.0 do projeto Wi-Fi, Ethernet e cartão SD. Inclui página de log, seis telas OLED,
-proteção de tela, monitoramento de rede, dois cores, serial, terminal web e OTA.
+
+## Clima externo — 1.15.0
+
+Temperatura e umidade de Porto Alegre vêm do [Open-Meteo](https://open-meteo.com/en/docs), nas coordenadas -30.03283, -51.23019, iguais às do M5NanoC6. São condições estimadas pelo serviço meteorológico; a temperatura interna da CPU permanece separada.
+
+A primeira consulta aguarda internet por Wi-Fi ou Ethernet e relógio sincronizado por NTP. Atualiza a cada 10 minutos; em caso de falha, tenta novamente após 2 minutos. O cache expira em 30 minutos, considerando também o horário informado pela API; dados ausentes ou vencidos viram `NaN`. A consulta HTTPS roda em tarefa própria no core 0, com resposta limitada a 2048 bytes. `/metrics` lê somente o cache. Novas consultas são suspensas durante OTA; uma consulta já iniciada pode terminar.
+
+Use `weather_status` pela Serial, UDP ou terminal web para ver rede, NTP, validade, temperatura, umidade, idade e último resultado HTTP. Instale **ArduinoJson 7.x** (revisado com os cabeçalhos 7.4.3); HTTPClient e NetworkClientSecure acompanham o pacote Arduino ESP32.
+
+Versão 1.15.0 do projeto Wi-Fi, Ethernet e cartão SD. Inclui Prometheus, página de log, seis telas OLED,
+crash_info, monitoramento de rede, dois cores, serial, terminal web e OTA.
+
+Documentação revisada em **19/10/2026**, conforme o firmware **1.15.0**.
+Referências: [comandos](COMANDOS.md), [Prometheus/Grafana](PROMETHEUS.md)
+e [histórico de alterações](CHANGELOG.md).
+
+## Revisão do áudio — 1.14.1
+
+Os documentos da ESP32-P4-Module-DEV-KIT confirmam o circuito **ES8311 + NS4150B**,
+I²C SDA7/SCL8, MCLK13, BCLK12, LRCK10, saída do ESP32 em GPIO9 e enable do
+amplificador em GPIO53. O GPIO11 é a saída do codec para captura, não a reprodução.
+Não foi necessário mudar os pinos. O usuário confirmou que o alto-falante está conectado.
+
+O driver agora reinicia o codec, confere o formato/DAC por leitura dos registradores,
+preserva os demais bits ao remover mute e transmite a mesma amostra em ambos os
+slots I2S de 16 bits, a 48 kHz. O amplificador recebe cerca de **100 ms de silêncio
+clockado antes do tom**, mais silêncio ao final, em sua tarefa própria.
+Escritas parciais são completadas com espera limitada; um timeout de reprodução
+é registrado sem desativar permanentemente a próxima tentativa.
+
+Essas mudanças tratam possíveis causas no software. Ainda não há confirmação de
+qual delas explica o silêncio nesta placa, nem teste físico da correção.
+
+Após compilar e gravar, use o botão **Testar som** no terminal web ou envie:
+
+```text
+audio_test
+audio_status
+```
+
+audio_test solicita um tom de **500 ms / 880 Hz** sem mudar a página. Aguarde
+cerca de um segundo antes de consultar audio_status. O status mostra inicialização,
+erro, solicitações, envios completos, falhas de escrita, bytes do último envio e
+registradores do ES8311. **Envio completo não comprova som audível**: valida apenas
+a entrega dos dados ao I2S. O GPIO53 normalmente já estará LOW ao consultar após
+o tom, pois o amplificador volta a desligar. Os contadores ficam em RAM e as
+solicitações rápidas podem ser agrupadas.
+
+Se continuar sem som, guarde a saída completa de audio_status e as mensagens
+[AUDIO] da serial. Os **35 testes da interface passaram**; não houve compilação,
+gravação ou teste sonoro físico pelo assistente, conforme combinado.
+
+Referência do exemplo da placa:
+[I2SCodec oficial da Waveshare](https://github.com/waveshareteam/ESP32-P4-Platform/blob/main/examples/esp-idf/12_I2SCodec/main/i2s_es8311_example.c).
+Fontes locais consultadas: esquema ESP32-P4-Module-DEV-KIT.pdf, página 1
+(Codec / PA&SPEAKER&MIC), e documentação Pinout_Definition, páginas 4–5.
+Os PDFs foram apenas lidos, sem modificações.
+
+## Métricas para Prometheus
+
+A temperatura interna da CPU é publicada em `esp_cpu_temperature_celsius`.
+No Grafana, consulte essa métrica e use a unidade Celsius (°C).
+O comando `temp` usa o mesmo sensor. Falhas são sinalizadas sem simular leituras.
+
+A conexão segue o M5NanoC6. Em /prometheus, informe o endereço do servidor,
+a porta de métricas da placa e o intervalo de coleta (5–3600 segundos).
+Salve nas Preferences; a porta muda cerca de um segundo depois, sem reiniciar.
+A interface web e a API continuam na porta 80, sem redirecionamento.
+
+O padrão inicial é /metrics na porta 80, compartilhando a web. Escolha outra
+porta para separar a coleta; 3232 fica reservada ao OTA. A coleta permanece ativa,
+sem chave de ativação ou campo separado para porta do servidor.
+Endereço e porta da versão anterior são preservados; o intervalo inicia em 15 s.
+
+Copie o YAML exibido ou baixe /prometheus.yml e aplique no servidor Prometheus.
+O intervalo salvo é escrito nesse YAML; só passa a valer no servidor após recarregá-lo.
+Use IP fixo/reserva DHCP e a série up para alertar quando a placa não responder.
+Todas as métricas anteriores, inclusive SD, permanecem disponíveis.
+
+O catálogo e a API estão em [PROMETHEUS.md](PROMETHEUS.md).
+Os 36 testes de interface passaram na validação mais recente; a compilação será feita pelo usuário.
+Coleta e persistência reais ainda precisam de teste na placa.
 
 ## Leitura do log pela página web
 
@@ -16,39 +96,69 @@ indica quando o trecho foi limitado. As consultas não aumentam o arquivo de log
 nem acordam o OLED. Falhas de cartão, arquivo ausente e OTA em andamento aparecem
 na página; leituras antigas permanecem visíveis com aviso de desatualização.
 
-## Proteção de tela
+## Botão, protetor e áudio — 1.14.0
 
-Na Waveshare ESP32-P4-WIFI6, os dois botões da placa são **BOOT** e **RST**.
-O RST reinicia o microcontrolador por hardware; não pode ser usado como botão
-de despertar por software. O GPIO 2 do projeto espera um **botão externo ligado
-entre GPIO 2 e GND**, com `INPUT_PULLUP`. O BOOT usa GPIO 35, compartilhado com
-Ethernet TXD1; não foi remapeado para não prejudicar a rede.
-Use **Acordar tela** no terminal web ou `protetor:wake` pela serial/UDP.
-O comando `botao_status` mostra o GPIO configurado e sua leitura: HIGH solto,
-LOW pressionado. Se ela não mudar ao apertar o botão externo, confira a ligação.
-Referência da placa: https://docs.waveshare.com/ESP32-P4-WIFI6.
+O botão fica entre **GPIO27 e GND**, com INPUT_PULLUP: LOW = pressionado.
+Uma pressão estável por 50 ms acorda o OLED e avança uma página, mantendo a rotação
+automática de oito segundos. Segurar não repete nem apaga as redes Wi-Fi.
+Use reset_wifi no terminal para limpar as redes; RST continua sendo reset de hardware.
 
-Após **60 segundos sem interação**, o OLED reduz o brilho e mostra um relógio
-que se desloca pela tela. Após **mais 4 minutos**, o controlador apaga o OLED.
-O ESP32 continua atendendo a rede, a serial e os demais serviços.
+Após **60 segundos sem interação**, carinhas de robô animadas ocupam todo o
+OLED 128×64, com olhos móveis, piscadas e quatro expressões. O display permanece
+ligado, sem entrar em sleep. O botão e comandos acordam; logs de rede, consultas
+web/Prometheus e troca automática não reiniciam esse tempo. A animação não usa delay.
+O progresso OTA tem prioridade. Há atalho **Carinhas de robô** no terminal web.
 
-O primeiro toque curto no botão acorda a tela mantendo a página. O próximo toque
-troca a página normalmente. Comandos usuais e eventos de conexão que aparecem no
-OLED também acordam o display. A rotação das páginas e a atualização automática
-do painel web não reiniciam o contador. Transferências e OTA mantêm o progresso
-visível. O pressionamento longo de cinco segundos continua limpando o Wi-Fi.
+Comandos: protetor:on (agora), protetor:off (desativa o automático e acorda),
+protetor:auto (reativa), protetor:status e protetor:tempo:SEGUNDOS (5–3600).
+Tempo e ativação do protetor ficam em RAM e retornam ao padrão ao reiniciar.
+protetor:status consulta sem acordar ou reiniciar o tempo; tela:next e tela:auto
+permitem voltar à navegação pela web/serial/UDP.
 
-Pela serial, UDP ou terminal web, use `protetor:on` para iniciar agora,
-`protetor:wake` para acordar, `protetor:off` para desabilitar a ativação automática
-e `protetor:auto` para habilitá-la. `protetor:tempo:120` altera a espera para dois
-minutos; são aceitos inteiros de **15 a 3600 segundos**. `protetor:status` consulta
-o estado sem acordar a tela. As configurações são temporárias: ao reiniciar,
-volta o padrão automático de 60 segundos. A proteção manual não altera a opção
-de ativação automática. Nenhum acesso ao OLED foi transferido para o core 0.
+Cada mudança real entre as seis páginas, automática ou manual, solicita um
+bip de 80 ms, 1200 Hz, com suavização de início/fim. A animação das carinhas não
+emite um som por quadro. O áudio roda numa tarefa própria no core 0; notificações
+rápidas são agrupadas, sem fila ilimitada. Durante OTA, novos sons são suspensos.
 
-Teste na placa: aguarde 60 segundos para conferir relógio e brilho; aguarde mais
-quatro minutos para apagar; pressione o botão uma vez para acordar sem mudar a
-página; confira os comandos e o progresso durante uma transferência/OTA.
+Codec **ES8311, I²C 0x18**, compartilhando Wire/SDA7/SCL8 com o OLED. I2S:
+**MCLK13, BCLK12, LRCK10, DOUT9**, 48 kHz, dois slots com sinal duplicado, 16 bits.
+O amplificador usa **GPIO53**, ativo em HIGH durante a estabilização, o bip e o silêncio final.
+Não há captura de microfone. O áudio não inicializa outro barramento I²C.
+Sem codec, a navegação continua sem som. Falhas de reprodução ficam no status; consulte audio_status
+e as mensagens [AUDIO] na serial. Não foi adicionada biblioteca externa de áudio.
+
+Referência da sequência de registradores:
+[exemplo oficial ES8311 da Waveshare](https://github.com/waveshareteam/ESP32-P4-WIFI6-DB/tree/main/examples/Arduino/i2s).
+Os pinos seguem os informados para esta placa; outros modelos Waveshare podem diferir.
+
+Os 35 testes da interface passaram. Sem compilação ou teste físico nesta revisão.
+
+## crash_info — 1.12.0
+
+O comando `crash_info` segue o central: informa o motivo do último reset, lê o
+core dump válido, arquiva o relatório no SD e só apaga o registro interno após
+reabrir o arquivo e conferir tamanho e conteúdo byte a byte. Sem SD, com gravação
+incompleta ou falha na conferência, o registro interno permanece para nova tentativa.
+
+O relatório mostra panic, tarefa, PC e identificador SHA256 do ELF. No ESP32-P4
+(RISC-V), inclui RA, SP, MCAUSE, MTVAL e a pilha bruta fornecida pelo SDK; a
+decodificação do backtrace exige o ELF do firmware que sofreu o crash. Preserve
+esse arquivo junto de cada versão. Não são exibidos endereços da pilha como se
+fossem um backtrace já decodificado.
+
+Os arquivos são `/crash_YYYYMMDD_HHMMSS.txt` ou `/crash_SEM_NTP_<uptime>.txt`,
+com sufixo numérico quando necessário. Use `sd_list` e `sd_read:/crash_....txt`
+para consultá-los. A página `/logs` continua lendo apenas `/log.txt`.
+
+Disponível pela serial, UDP e terminal web. No UDP, o relatório é dividido em
+pacotes de até 1200 bytes para caber no receptor do central; a entrega continua
+sujeita às perdas e à ordem do UDP. No navegador, a operação pede confirmação,
+pois arquiva dados e apaga o registro interno depois da verificação.
+
+Sem crash válido, informa essa condição e o último reset, sem criar arquivo ou
+apagar dados. Se o SDK não habilitar core dump em flash/ELF, informa que o recurso
+está desabilitado. O SDK ESP32-P4 3.3.12 e a tabela padrão usados no projeto já
+incluem esse suporte e a partição coredump. O comando não provoca um crash.
 
 ## Dois cores e atualização de firmware
 
@@ -56,12 +166,15 @@ O core 0 recebe a serial e coloca comandos em uma fila de oito posições. O cor
 executa comandos e cuida de web, UDP, SD, OLED e OTA. Não há acesso simultâneo ao
 SD/OLED pelas duas tarefas. Use `cores` para conferir o core de execução e a fila.
 Se a fila encher, comandos inteiros são descartados, com aviso na serial.
+A tarefa de áudio `page_audio` também roda no core 0, recebendo notificações e
+transmitindo o bip por I2S. Ela não acessa o OLED nem faz operações I²C; a configuração
+do codec acontece no início, usando o mesmo `Wire` do display.
 
 Para atualizar pelo navegador, abra `/firmware`, entre como `admin` e use a senha
-indicada na serial por `[OTA]`. Ela é gerada por dispositivo e permanece salva.
+fixa `123456`. Ela também é usada pelo Arduino IDE, sem geração ou leitura nas
+Preferences; senhas antigas salvas são ignoradas. Use somente em rede confiável.
 Envie `ota_password` pela serial para consultá-la novamente; esse comando não
-revela a senha pelo navegador ou UDP. Se não for possível guardar/verificar a
-senha, OTA fica desabilitado.
+revela a senha pelo navegador ou UDP.
 
 Para atualizar pelo Arduino IDE, selecione a porta de rede `esp32-p4-node` e use
 a mesma senha. O serviço usa a porta 3232 e descoberta mDNS na rede local.
@@ -80,12 +193,12 @@ a execução dos comandos fica suspensa; a recepção serial continua com fila l
 Mantenha a alimentação. Use em rede local confiável. Não há rollback automático
 se uma nova versão válida iniciar e depois falhar em execução.
 
-Validação: a versão **1.11.0** compilou para `ESP32P4 Dev Module` com Arduino ESP32
+Última compilação concluída registrada: a versão anterior **1.11.0** compilou para `ESP32P4 Dev Module` com Arduino ESP32
 **3.3.12**, usando **1.223.348 bytes (93%)** da partição padrão de 1.310.720 bytes.
-Os 20 testes automatizados das interfaces web passaram, incluindo log e despertar.
+Os 22 testes automatizados das interfaces web passaram, incluindo log, `crash_info` e controle de telas.
 A compilação usou as opções padrão; na instalação, escolha a revisão do chip,
-USB e flash reais da placa. Ainda não foram feitos testes físicos da proteção
-de tela nem gravação desta versão na placa.
+USB e flash reais da placa. Ainda não foram feitos testes físicos de `crash_info`
+e da alternância contínua de telas, nem gravação desta versão na placa.
 
 ## Painel e comandos
 
@@ -119,7 +232,10 @@ completa de comandos. Leituras extensas no cartão SD ainda podem atrasar o pain
 | Display | OLED SSD1306, 128 × 64, endereço I2C 0x3C |
 | OLED SDA / SCL | GPIO 7 / GPIO 8 |
 | LED | GPIO 1 |
-| Botão de navegação e limpeza | GPIO 2, ligado ao GND, INPUT_PULLUP |
+| Botão de navegação | GPIO27, ligado ao GND, INPUT_PULLUP |
+| Codec de áudio | ES8311, I²C 0x18, compartilhando SDA7/SCL8 com o OLED |
+| I2S MCLK / BCLK / LRCK / DOUT | GPIO13 / GPIO12 / GPIO10 / GPIO9 |
+| Amplificador do alto-falante | GPIO53, habilitação em HIGH durante o bip |
 | Ethernet | PHY IP101, endereço 1 |
 | Ethernet MDC / MDIO | GPIO 31 / GPIO 52 |
 | Alimentação PHY | GPIO 51 |
@@ -156,19 +272,21 @@ O Ethernet é inicializado mesmo quando nenhuma rede Wi-Fi salva conecta.
 | 4 | Ping ao gateway por interface, percentual sem resposta e gráfico |
 | 5 | Quatro eventos de conexão mais recentes |
 
-As telas mudam automaticamente a cada oito segundos e atualizam uma vez por
-segundo. `tela:N` fixa uma tela; `tela:next` avança; `tela:auto` retoma a troca
+As páginas de informação mudam automaticamente a cada oito segundos e atualizam
+uma vez por segundo, enquanto o protetor está inativo. `tela:N` fixa uma tela;
+`tela:next` avança; `tela:auto` retoma a troca
 automática. A moldura é composta no buffer do OLED antes de ser enviada.
-Comandos e eventos podem mostrar o terminal por cinco segundos. Durante operações
-com progresso, o terminal permanece visível até a operação terminar.
+Comandos mostram o terminal por cinco segundos. Eventos de rede não substituem
+as carinhas enquanto o protetor está ativo. Durante operações com progresso,
+o protetor é interrompido e o terminal permanece visível até a operação terminar.
 
 ## Botão
 
-- Toque curto e solte: avança uma tela e desativa a troca automática.
-- Segure por cinco segundos e solte: apaga as redes Wi-Fi salvas e reinicia.
+- Pressione: acorda e avança uma tela, mantendo a troca automática.
+- Segure: permanece na mesma ação, sem repetir e sem apagar as redes.
 
-O botão é GPIO 2, independente do botão EN da placa. A limpeza mantém firmware,
-configurações de horário e arquivos do SD. `reset_wifi` continua disponível.
+O botão fica entre GPIO27 e GND. RST é independente. Para limpar as redes,
+use reset_wifi no terminal. Consulte a seção 1.14.0 para protetor e áudio.
 
 ## Monitor de rede
 
@@ -227,6 +345,9 @@ Referências: [ICMP Echo da Espressif](https://docs.espressif.com/projects/esp-i
 e [ESP-NETIF](https://docs.espressif.com/projects/esp-idf/en/release-v5.1/esp32/api-reference/network/esp_netif.html).
 
 ## Melhorias da versão 1.5.1
+
+Histórico: a ação antiga de limpar redes ao segurar o botão não existe no GPIO27
+da versão atual. Consulte a seção **Botão, protetor e áudio — 1.14.0**.
 
 - `net_monitor` mostra RTT mínimo, médio e máximo de respostas válidas desde o
   boot e idade da última medição. Timeouts não entram na média.

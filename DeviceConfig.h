@@ -12,9 +12,18 @@
 
 // Periféricos locais da Placa
 #define LED_PIN       1
-// External user button between GPIO 2 and GND; NOT the board's RST button.
+// External navigation button between GPIO 27 and GND, active LOW.
 // RST resets the MCU. BOOT (GPIO 35) shares Ethernet TXD1 on this board.
-#define BOTAO_RESET   2
+#define BOTAO_RESET   27
+#define AUDIO_CODEC_ADDRESS 0x18
+#define AUDIO_MCLK 13
+#define AUDIO_BCLK 12
+#define AUDIO_LRCK 10
+#define AUDIO_DOUT 9
+#define AUDIO_AMP_ENABLE 53
+// Same Open-Meteo location as the M5NanoC6 reference project: Porto Alegre centre.
+constexpr double WEATHER_LATITUDE = -30.03283;
+constexpr double WEATHER_LONGITUDE = -51.23019;
 
 // Configurações Ethernet (ESP32-P4 DevKit com PHY IP101)
 #define ETH_PHY_TYPE   ETH_PHY_IP101  

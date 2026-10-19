@@ -6,7 +6,7 @@ NetworkController* NetworkController::_instance = nullptr;
 bool NetworkController::ethConectado = false;
 
 NetworkController::NetworkController(OledDisplay& oledRef, StorageManager& storageRef)
-  : _server(80), _oled(oledRef), _storage(storageRef), _dadosProntosParaSalvar(false), _rotasOk(false) {
+  : _server(80), _oled(oledRef), _storage(storageRef), _metrics(storageRef), _dadosProntosParaSalvar(false), _rotasOk(false) {
   _instance = this;
 }
 
@@ -14,10 +14,12 @@ void NetworkController::inicializar()
  {
   _networkEvents = xQueueCreate(16, sizeof(arduino_event_id_t));
   WiFi.onEvent(onNetworkEvent);
+  _metrics.begin();
 }
 
 void NetworkController::onNetworkEvent(arduino_event_id_t event, arduino_event_info_t info) {
   if (!_instance) return;
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) _instance->_metrics.wifiDisconnected();
   if (event == ARDUINO_EVENT_ETH_START) ETH.setHostname("esp32-p4-node");
   // I2C and String history belong to the main loop, never to the event task.
   if (_instance->_networkEvents) xQueueSend(_instance->_networkEvents, &event, 0);
@@ -108,6 +110,12 @@ bool NetworkController::conectarWifi() {
 
 void NetworkController::configurarRotas() {
   if (_rotasOk) return;
+  _server.addMiddleware([this](WebServer& server, Middleware::Callback next) {
+    uint64_t started = esp_timer_get_time();
+    bool result = next();
+    _metrics.recordRequest(started, server.responseCode() >= 400);
+    return result;
+  });
   const char* headers[] = {"X-ESP32-Command", "X-ESP32-Firmware"};
   _server.collectHeaders(headers, 2);
   _server.on("/", HTTP_GET, handleRootCallback);
@@ -118,6 +126,22 @@ void NetworkController::configurarRotas() {
   _server.on("/api/command", HTTP_POST, [this]() { handleCommand(); });
   _server.on("/logs", HTTP_GET, [this]() { handleLogs(); });
   _server.on("/api/logs", HTTP_GET, [this]() { handleLogData(); });
+  _server.on("/prometheus", HTTP_GET, [this]() {
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.send(200, "text/html; charset=utf-8", _metrics.page());
+  });
+  _server.on("/api/prometheus", HTTP_POST, [this]() { handlePrometheusSave(); });
+  _server.on("/api/prometheus/config", HTTP_POST, [this]() { handlePrometheusSave(); });
+  _server.on("/api/prometheus/config", HTTP_GET, [this]() {
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.send(200, "application/json; charset=utf-8", _metrics.configurationJson());
+  });
+  _server.on("/metrics", HTTP_GET, [this]() { _metrics.serveOnWeb(_server); });
+  _server.on("/prometheus.yml", HTTP_GET, [this]() {
+    _server.sendHeader("Cache-Control", "no-store");
+    _server.sendHeader("Content-Disposition", "attachment; filename=prometheus-esp32-p4.yml");
+    _server.send(200, "text/plain; charset=utf-8", _metrics.scrapeConfiguration());
+  });
   _firmware.begin(_server, _oled);
   _server.begin();
   _rotasOk = true;
@@ -278,6 +302,23 @@ void NetworkController::handleInfo() {
  _server.send(200,"text/html; charset=utf-8",h);
 }
 
+void NetworkController::handlePrometheusSave() {
+  _server.sendHeader("Cache-Control", "no-store");
+  if (_server.header("X-ESP32-Command") != "1" || !_server.hasArg("host") ||
+      !_server.hasArg("port") || !_server.hasArg("interval")) {
+    _server.send(400, "text/plain; charset=utf-8", "Formulário incompleto ou inválido."); return;
+  }
+  if (_dadosProntosParaSalvar || _firmware.busy()) {
+    _server.send(409, "text/plain; charset=utf-8", "Aguarde a atualização ou reinício."); return;
+  }
+  String error;
+  int status;
+  if (!_metrics.save(_server.arg("host"), _server.arg("port"), _server.arg("interval"), error, status)) {
+    _server.send(status, "text/plain; charset=utf-8", error); return;
+  }
+  _server.send(200, "application/json; charset=utf-8", _metrics.configurationJson());
+}
+
 void NetworkController::handleCommand() {
   _server.sendHeader("Cache-Control", "no-store");
   // A custom header prevents cross-origin HTML forms from invoking commands.
@@ -374,6 +415,8 @@ void NetworkController::processarPortalERedes()
   configurarPrioridadeDeRede();
   _monitor.update(WiFi.status() == WL_CONNECTED, ethConectado);
   _server.handleClient();
+  if (!_firmware.busy()) _storage.sampleTelemetry();
+  _metrics.handle(_firmware.busy());
   if (!_dadosProntosParaSalvar) _firmware.handle();
   if (_dadosProntosParaSalvar && int32_t(millis()-_restartAt)>=0) ESP.restart();
 }

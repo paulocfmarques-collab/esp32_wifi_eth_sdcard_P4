@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "FirmwareUpdater.h"
+#include "PrometheusMetrics.h"
 
 #define NUM_REDES 5
 
@@ -26,6 +27,7 @@ private:
   Preferences _prefs;
   OledDisplay& _oled;
   StorageManager& _storage;
+  PrometheusMetrics _metrics;
 
   static NetworkController* _instance;
   volatile bool _dadosProntosParaSalvar;
@@ -50,6 +52,7 @@ private:
   void handleCommand();
   void handleLogs();
   void handleLogData();
+  void handlePrometheusSave();
   void configurarRotas();
   bool tentarRede(const String& ssid, const String& senha);
   void carregarRedes(String ssids[NUM_REDES], String senhas[NUM_REDES], int& idx);
@@ -74,6 +77,7 @@ public:
   
   WiFiUDP& getUdpDriver() { return _udp; }
   void responderUDP(const String& msg);
+  bool resetCounters() { return _metrics.resetCounters(); }
   const NetworkMonitor& monitor() const { return _monitor; }
   void zerarConfiguracoes();
   String listarSSIDs();

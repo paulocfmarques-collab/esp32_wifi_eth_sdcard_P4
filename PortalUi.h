@@ -9,7 +9,7 @@ static const char PORTAL_CONSOLE[] PROGMEM = R"CONSOLE(
 <div class='actions'><span class='badge ok' id='live-state' role='status'>Painel conectado</span><button class='secondary' id='pause-live' type='button'>Pausar atualização</button><small id='live-time'>Atualização a cada 5 segundos</small></div>
 <article class='card section' id='terminal'><div class='net-title'><div><div class='eyebrow'>Controle do dispositivo</div><h2>Terminal de comandos</h2></div><span class='badge'>USB · UDP · Web</span></div>
 <p class='muted'>Consulte o estado, controle o LED e explore os arquivos usando os mesmos comandos da serial.</p>
-<div class='actions' id='quick-commands'><button type='button' class='secondary' data-command='status'>Estado</button><button type='button' class='secondary' data-command='health'>Diagnóstico</button><button type='button' class='secondary' data-command='protetor:wake'>Acordar tela</button><button type='button' class='secondary' data-command='led_on'>Ligar LED</button><button type='button' class='secondary' data-command='led_off'>Desligar LED</button><button type='button' class='secondary' data-command='tela:next'>Próxima tela</button><button type='button' class='secondary' data-command='sd_list'>Arquivos SD</button><button type='button' class='secondary' data-command='help'>Ajuda</button></div>
+<div class='actions' id='quick-commands'><button type='button' class='secondary' data-command='status'>Estado</button><button type='button' class='secondary' data-command='health'>Diagnóstico</button><button type='button' class='secondary' data-command='tela:auto'>Telas automáticas</button><button type='button' class='secondary' data-command='protetor:on'>Carinhas de robô</button><button type='button' class='secondary' data-command='audio_test'>Testar som</button><button type='button' class='secondary' data-command='weather_status'>Clima externo</button><button type='button' class='secondary' data-command='led_on'>Ligar LED</button><button type='button' class='secondary' data-command='led_off'>Desligar LED</button><button type='button' class='secondary' data-command='tela:next'>Próxima tela</button><button type='button' class='secondary' data-command='sd_list'>Arquivos SD</button><button type='button' class='secondary' data-command='help'>Ajuda</button></div>
 <pre id='console-output' role='log' aria-label='Respostas dos comandos' tabindex='0'>Pronto. Digite help para listar os comandos.
 </pre><form id='command-form'><label class='field' for='command-input'>Comando</label><div class='command-line'><input type='text' id='command-input' autocomplete='off' spellcheck='false' placeholder='Ex.: status ou sd_tail:/log.txt:10' maxlength='254' required><button id='command-send' type='submit'>Enviar</button></div></form>
 <div class='actions'><button type='button' class='secondary' id='clear-console'>Limpar terminal</button><small>Serial USB: 115200 baud · Termine cada comando com Enter (LF ou CR).</small></div><p class='hint'>O terminal controla este dispositivo pela rede local. Comandos que alteram arquivos ou configurações pedem confirmação. Respostas web limitadas a 8 KB.</p></article>
@@ -33,7 +33,7 @@ async function send(command){
  if(busy)return;
  if(new TextEncoder().encode(command).length>254||/[\r\n]/.test(command)){write('\nErro: use até 254 bytes e uma única linha.\n');return}
  const name=command.split(':')[0].trim().toLowerCase();
- if(/^(reboot|restart|reset_wifi|wifi_add|sd_write|write|sd_append|sd_del|delete|sd_clear_log|sd_mkdir|sd_rmdir|set_fuso|set_tz|dst|set_dst|dst_on|dst_off)$/.test(name)&&!confirm('Executar '+name+'? Essa ação altera o dispositivo.'))return;
+ if(/^(reboot|restart|reset_wifi|reset_counters|wifi_add|sd_write|write|sd_append|sd_del|delete|sd_clear_log|sd_mkdir|sd_rmdir|set_fuso|set_tz|dst|set_dst|dst_on|dst_off|crash_info)$/.test(name)&&!confirm(name==='crash_info'?'Arquivar o crash no SD e apagar o registro interno somente após verificar a cópia?':'Executar '+name+'? Essa ação altera o dispositivo.'))return;
  const sensitive=name==='wifi_add';if(!sensitive){history.push(command);if(history.length>50)history.shift()}position=history.length;
  write('\n› '+(sensitive?'wifi_add:[credenciais ocultas]':command)+'\n');busy=true;input.value='';
  const buttons=[...byId('terminal').querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
@@ -99,18 +99,34 @@ el('log-refresh').onclick=()=>load(true);el('log-lines').onchange=()=>load(true)
 el('log-auto').onchange=()=>{if(el('log-auto').checked)load()};el('log-follow').onchange=render;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});setInterval(load,5000);load(true);
 })();</script>)LOGS";
-static String portalStart(const char* title, bool wifi, bool logs = false) {
- String h; h.reserve(11000);
- h = F("<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>");
- h += "<title>" + String(title) + " · ESP32-P4</title>";
- h += FPSTR(PORTAL_STYLE);
- h += F("</head><body><div class='layout'><aside><a class='brand' href='/info'><span class='mark'>P4</span><span>Network Hub<small>ESP32 MONITOR</small></span></a><nav class='nav' aria-label='Navegação'>");
- h += String("<a href='/info' ") + (!wifi && !logs ? "class='active' aria-current='page'" : "") + ">Informações</a>";
- h += String("<a href='/wifi' ") + (wifi ? "class='active' aria-current='page'" : "") + ">Redes Wi-Fi</a>";
- h += F("<a href='/info#terminal'>Terminal</a>");
- h += String("<a href='/logs' ") + (logs ? "class='active' aria-current='page'" : "") + ">Log do dispositivo</a>";
- h += F("<a href='/firmware'>Firmware</a>");
- h += F("</nav><p class='aside-note'>Seu dispositivo, suas conexões.<br><br>Portal local · ESP32-P4</p></aside><main>");
- return h;
+
+static String portalStart(const char* title, bool wifi, bool logs = false, bool prometheus = false)
+{
+    String h;
+    h.reserve(11000);
+    h = F("<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><meta name='viewport' "
+          "content='width=device-width,initial-scale=1'>");
+    h += "<title>" + String(title) + " · ESP32-P4</title>";
+    h += FPSTR(PORTAL_STYLE);
+    h += F("</head><body><div class='layout'><aside><a class='brand' href='/info'><span "
+           "class='mark'>P4</span><span>Network Hub<small>ESP32 MONITOR</small></span></a><nav "
+           "class='nav' aria-label='Navegação'>");
+    h += String("<a href='/info' ") + (!wifi && !logs && !prometheus ? "class='active' aria-current='page'" : "") +
+         ">Informações</a>";
+    h += String("<a href='/wifi' ") + (wifi ? "class='active' aria-current='page'" : "") +
+         ">Redes Wi-Fi</a>";
+    h += F("<a href='/info#terminal'>Terminal</a>");
+    h += String("<a href='/logs' ") + (logs ? "class='active' aria-current='page'" : "") +
+         ">Log do dispositivo</a>";
+    h += F("<a href='/firmware'>Firmware</a>");
+    h += String("<a href='/prometheus' ") + (prometheus ? "class='active' aria-current='page'" : "") + ">Prometheus</a>";
+    h += F("</nav><p class='aside-note'>Seu dispositivo, suas conexões.<br><br>Portal local · "
+           "ESP32-P4</p></aside><main>");
+    return h;
 }
-static String portalEnd() { return F("<footer class='footer'>ESP32-P4 · Wi-Fi / Ethernet / SD</footer></main></div></body></html>"); }
+
+static String portalEnd()
+{
+    return F("<footer class='footer'>ESP32-P4 · Wi-Fi / Ethernet / "
+             "SD</footer></main></div></body></html>");
+}

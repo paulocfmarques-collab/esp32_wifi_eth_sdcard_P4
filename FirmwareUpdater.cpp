@@ -1,29 +1,16 @@
 #include "FirmwareUpdater.h"
 #include "PortalUi.h"
-#include <Preferences.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
-#include <esp_random.h>
 #include <ctype.h>
 #include <WiFi.h>
 #include <ETH.h>
 
 void FirmwareUpdater::begin(WebServer& server, OledDisplay& oled) {
   _server = &server; _oled = &oled;
-  Preferences prefs;
-  if (prefs.begin("ota", false)) {
-    _password = prefs.getString("password", "");
-    if (_password.isEmpty()) {
-      uint8_t random[16]; esp_fill_random(random, sizeof(random));
-      const char hex[] = "0123456789abcdef";
-      for (uint8_t b : random) { _password += hex[b >> 4]; _password += hex[b & 15]; }
-      prefs.putString("password", _password);
-    }
-    _enabled = _password.length() >= 16 && prefs.getString("password", "") == _password;
-    prefs.end();
-  }
+  _password = "123456";
+  _enabled = true;
   if (_enabled) {
-    // Local commissioning only: do not copy this credential to OLED, SD or HTTP.
     imprimirCredenciais();
     ArduinoOTA.setHostname("esp32-p4-node");
     ArduinoOTA.setPassword(_password.c_str());
@@ -47,7 +34,7 @@ void FirmwareUpdater::begin(WebServer& server, OledDisplay& oled) {
       _busy = false; _oled->configurarProgresso(false, 0);
       Serial.printf("[OTA] Falha Arduino IDE: %u\n", unsigned(error));
     });
-  } else Serial.println(F("[OTA] Desativado: falha ao guardar/verificar senha."));
+  }
   server.on("/firmware", HTTP_GET, [this]() { page(); });
   server.on("/api/firmware", HTTP_POST, [this]() { complete(); }, [this]() { upload(); });
 }

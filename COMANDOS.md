@@ -1,4 +1,25 @@
-# Comandos — ESP32-P4 v1.11.0
+# Comandos — ESP32-P4 v1.15.0
+
+
+## Clima externo — 1.15.0
+
+Temperatura e umidade de Porto Alegre vêm do [Open-Meteo](https://open-meteo.com/en/docs), nas coordenadas -30.03283, -51.23019, iguais às do M5NanoC6. São condições estimadas pelo serviço meteorológico; a temperatura interna da CPU permanece separada.
+
+A primeira consulta aguarda internet por Wi-Fi ou Ethernet e relógio sincronizado por NTP. Atualiza a cada 10 minutos; em caso de falha, tenta novamente após 2 minutos. O cache expira em 30 minutos, considerando também o horário informado pela API; dados ausentes ou vencidos viram `NaN`. A consulta HTTPS roda em tarefa própria no core 0, com resposta limitada a 2048 bytes. `/metrics` lê somente o cache. Novas consultas são suspensas durante OTA; uma consulta já iniciada pode terminar.
+
+Use `weather_status` pela Serial, UDP ou terminal web para ver rede, NTP, validade, temperatura, umidade, idade e último resultado HTTP. Instale **ArduinoJson 7.x** (revisado com os cabeçalhos 7.4.3); HTTPClient e NetworkClientSecure acompanham o pacote Arduino ESP32.
+
+Revisão documental: **31/10/2026**.
+
+Estado conferido com o código **1.15.0**: GPIO27 para navegação, protetor de
+robôs, som de troca de página e o comando `reset_counters`. A compilação e a
+gravação permanecem pendentes; esta revisão também altera o firmware.
+
+Desde 1.13.2, o comando `temp` compartilha o sensor com a métrica
+`esp_cpu_temperature_celsius` do Prometheus/Grafana. Em falha, responde
+`Temp: indisponivel`; a métrica fica `NaN`, sem retornar zero falso.
+[CHANGELOG.md](CHANGELOG.md) e
+[catálogo geral](../../ESP32_Documents/COMANDOS.md).
 
 Envie por UDP à porta **4210**, pela serial a **115200 baud** ou pelo terminal
 web em `/info`. O firmware responde pelo canal de origem. Na serial, termine
@@ -6,41 +27,102 @@ cada comando com LF, CR ou CRLF e aguarde o fim da inicialização.
 Limite: **254 bytes por comando**. Nomes não distinguem maiúsculas/minúsculas;
 argumentos preservam a caixa. Arquivos SD podem gerar várias respostas UDP.
 
-## Proteção do OLED
+## Prometheus pela interface web
+
+O padrão de conexão segue o M5NanoC6. Configure endereço do servidor, porta de
+métricas da placa e intervalo (5–3600 s) em /prometheus, na porta 80.
+As Preferences preservam esses valores. A porta muda após cerca de um segundo,
+sem reiniciar; a web e a API permanecem na 80.
+
+Na porta 80, /metrics compartilha a web. Nas outras portas, o servidor de coleta
+atende apenas /metrics. A porta 3232 é reservada ao OTA. Não há envio ativo.
+Não há mais chave de ativação ou campo para porta de acesso ao servidor Prometheus.
+
+| Endpoint na porta 80 | Ação |
+| --- | --- |
+| GET /prometheus | Formulário de conexão e YAML gerado. |
+| GET /api/prometheus/config | host, port, active_port, web_port, interval, mode, scrape_config, persistent_counters_ok. |
+| POST /api/prometheus/config | Salva formulário host, port e interval; exige X-ESP32-Command: 1. |
+| GET /prometheus.yml | Download do YAML para aplicar no servidor. |
+
+POST /api/prometheus é um alias que aceita os mesmos três campos do novo formato.
+GET /metrics na porta 80 retorna 404 quando outra porta de métricas está ativa.
+As métricas, inclusive as do SD, são descritas em [PROMETHEUS.md](PROMETHEUS.md).
+O padrão atual da porta de métricas é **80**; valores legados salvos são
+preservados na migração. O namespace deste projeto é `prometheus`, não
+`telemetry`. O endereço do servidor é uma referência, não uma restrição de origem.
+`reset_counters` zera somente os contadores de boot, reinicialização e watchdog
+nesse namespace, preservando a configuração de coleta.
+
+## Diagnóstico de áudio — 1.14.1
+
+Execute audio_test, aguarde cerca de um segundo e consulte audio_status. O status
+confirma dados enviados ao I2S, não a saída acústica. Escritas parciais/timeout
+são registradas e a próxima solicitação pode tentar novamente. A preparação inclui
+cerca de 100 ms de silêncio para o amplificador. Veja README.md para detalhes.
+
+## OLED, botão e áudio
+
+Botão GPIO27/GND (INPUT_PULLUP), ativo em LOW: uma pressão acorda e avança uma
+página; segurar não apaga Wi-Fi nem repete. A rotação continua a cada oito segundos
+enquanto o protetor está inativo. Após 60 s sem interação, o robô ocupa todo o OLED,
+sem desligar a tela. Logs e consultas web/Prometheus não reiniciam a inatividade.
+Trocas manuais e automáticas entre páginas emitem um bip assíncrono pelo ES8311.
 
 | Comando | Função |
-|---|---|
-| `protetor:on` | Inicia a proteção imediatamente sem alterar a opção automática. |
-| `protetor:off` | Desabilita a proteção automática e acorda a tela. |
-| `protetor:auto` | Habilita a proteção automática com o tempo atualmente configurado. |
-| `protetor:wake` | Acorda o OLED e reinicia a contagem de inatividade. |
-| `protetor:status` | Consulta o estado sem acordar o display. |
-| `protetor:tempo:120` | Ajusta a espera para 120 segundos e habilita a proteção automática. |
-| `botao_status` | Mostra o GPIO configurado e sua leitura LOW/HIGH para diagnóstico do botão. |
+| --- | --- |
+| protetor:on | Mostra as carinhas agora. |
+| protetor:off | Acorda e desativa a entrada automática. |
+| protetor:auto | Acorda e reativa a entrada automática. |
+| protetor:status | Consulta sem acordar ou reiniciar a inatividade. |
+| protetor:tempo:60 | Tempo de inatividade, de 5 a 3600 s; fica em RAM. |
+| audio_status | Estado do ES8311/I2S, pinos, erro, contadores, bytes enviados e leitura dos registradores. |
+| audio_test | Solicita teste de 500 ms / 880 Hz sem trocar a página; não recebe argumentos. |
+| botao_status | Pino configurado e leitura LOW/HIGH. |
 
-Tempo aceito: inteiro de 15 a 3600 segundos. Padrão ao reiniciar: 60 segundos.
-Após a ativação, o relógio se move com brilho reduzido por quatro minutos; depois
-o OLED apaga. As opções não são gravadas em memória permanente. O primeiro toque
-curto no botão acorda sem mudar a página; um segundo toque avança normalmente.
+tela:next e tela:auto também saem das carinhas. O terminal web oferece o atalho
+Carinhas de robô. A configuração detalhada de som está em README.md.
+Não há handler sd_test nesta versão.
+
+Exemplos para conferir após gravar o firmware:
+
+```text
+botao_status
+audio_test
+audio_status
+protetor:on
+tela:next
+protetor:tempo:60
+protetor:auto
+```
+
+`botao_status` deve indicar GPIO27 e LOW ao pressionar. `audio_status` mostra
+se o codec/I2S ficou pronto e o último erro. `protetor:on` permite observar as
+carinhas sem aguardar o tempo de inatividade; `tela:next` acorda e avança.
+Os ajustes do protetor ficam em RAM: ao reiniciar, volta a entrada automática
+após 60 s. O estado das métricas continua independente desses ajustes.
 
 ## Sistema
 
 | Comando | Função | Exemplo |
 |---|---|---|
 | `help` | Lista comandos e aliases. | `help` |
+| `name` | Identifica o dispositivo; responde `ESP32P4`. | `name` |
 | `info` | Informações gerais da placa. | `info` |
 | `status` | Resumo de Wi-Fi, SD, relógio e heap. | `status` |
 | `version` | Versão do firmware. | `version` |
 | `build` | Data e hora da compilação. | `build` |
+| `crash_info` | Lê o crash, arquiva e verifica no SD, e só então apaga o registro interno. | `crash_info` |
 | `reason` | Motivo do último reset. | `reason` |
 | `alive` | Responde ALIVE. | `alive` |
 | `cores` | Core de execução, tarefa serial e ocupação da fila. | `cores` |
 | `ota_info` | Serviço OTA, porta e tamanho da partição. | `ota_info` |
-| `ota_password` | Mostra usuário/senha OTA somente na serial local. | `ota_password` |
+| `ota_password` | Mostra usuário `admin` e senha OTA fixa `123456` somente na serial local. | `ota_password` |
 | `uptime` | Tempo ligado em milissegundos. | `uptime` |
 | `lastcmd` | Último comando; credenciais ficam ocultas. | `lastcmd` |
 | `cmdcount` | Total de comandos, exceto lastcmd/cmdcount. | `cmdcount` |
 | `reboot` | Reinicia após responder. | `reboot` |
+| `reset_counters` | Zera somente os contadores NVS de boot/reboot/watchdog. | `reset_counters` |
 
 ## Diagnóstico e hardware
 
@@ -84,7 +166,7 @@ curto no botão acorda sem mudar a página; um segundo toque avança normalmente
 | `tela:3` | Sistema e SD. | `tela:3` |
 | `tela:4` | Ping aos gateways e gráfico. | `tela:4` |
 | `tela:5` | Últimos quatro eventos de conexão. | `tela:5` |
-| `tela:next` | Avança e desativa rotação automática. | `tela:next` |
+| `tela:next` | Avança e mantém rotação automática. | `tela:next` |
 | `tela:auto` | Retoma rotação a cada oito segundos. | `tela:auto` |
 
 ## Horário
@@ -174,8 +256,8 @@ apaga o log. Operações NVS com vários campos não são atômicas contra falta
 
 ## Botão e portal
 
-GPIO 2: toque curto avança tela; segure cinco segundos e solte para limpar redes
-e reiniciar. `/info` mostra informações; `/wifi` edita os cinco perfis.
+GPIO27/GND: pressione para acordar e avançar a tela. Segurar não limpa redes.
+Use reset_wifi para essa operação. `/info` mostra informações; `/wifi` edita os cinco perfis.
 
 ## Interpretação dos diagnósticos
 
@@ -198,3 +280,30 @@ de 8 KB são truncadas com um aviso; use `sd_tail` para consultar arquivos grand
 O terminal pede confirmação para comandos que alteram arquivos/configurações.
 Se a conexão cair, verifique o estado antes de repetir um comando de escrita.
 
+
+## crash_info — 1.12.0
+
+O comando `crash_info` segue o central: informa o motivo do último reset, lê o
+core dump válido, arquiva o relatório no SD e só apaga o registro interno após
+reabrir o arquivo e conferir tamanho e conteúdo byte a byte. Sem SD, com gravação
+incompleta ou falha na conferência, o registro interno permanece para nova tentativa.
+
+O relatório mostra panic, tarefa, PC e identificador SHA256 do ELF. No ESP32-P4
+(RISC-V), inclui RA, SP, MCAUSE, MTVAL e a pilha bruta fornecida pelo SDK; a
+decodificação do backtrace exige o ELF do firmware que sofreu o crash. Preserve
+esse arquivo junto de cada versão. Não são exibidos endereços da pilha como se
+fossem um backtrace já decodificado.
+
+Os arquivos são `/crash_YYYYMMDD_HHMMSS.txt` ou `/crash_SEM_NTP_<uptime>.txt`,
+com sufixo numérico quando necessário. Use `sd_list` e `sd_read:/crash_....txt`
+para consultá-los. A página `/logs` continua lendo apenas `/log.txt`.
+
+Disponível pela serial, UDP e terminal web. No UDP, o relatório é dividido em
+pacotes de até 1200 bytes para caber no receptor do central; a entrega continua
+sujeita às perdas e à ordem do UDP. No navegador, a operação pede confirmação,
+pois arquiva dados e apaga o registro interno depois da verificação.
+
+Sem crash válido, informa essa condição e o último reset, sem criar arquivo ou
+apagar dados. Se o SDK não habilitar core dump em flash/ELF, informa que o recurso
+está desabilitado. O SDK ESP32-P4 3.3.12 e a tabela padrão usados no projeto já
+incluem esse suporte e a partição coredump. O comando não provoca um crash.
