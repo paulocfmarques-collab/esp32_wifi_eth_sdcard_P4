@@ -19,6 +19,13 @@ public:
     void recordRequest(uint64_t startedUs, bool error);
     bool resetCounters();
     void wifiDisconnected() { _disconnects.fetch_add(1); }
+    void udpListenerOpened(bool up) { _udpListenerUp = up; }
+    void udpPacketReceived() { ++_udpReceived; }
+    void udpReplyResult(bool sent) { if (sent) ++_udpReplies; else ++_udpSendErrors; }
+    uint64_t udpSendErrors() const { return _udpSendErrors; }
+    uint64_t udpReceived() const { return _udpReceived; }
+    uint64_t udpReplies() const { return _udpReplies; }
+    uint16_t configuredPort() const { return _port; }
 private:
     StorageManager& _storage;
     WebServer _server;
@@ -28,6 +35,8 @@ private:
     uint32_t _savedAt = 0;
     uint64_t _boots = 0, _reboots = 0, _watchdogs = 0;
     uint64_t _requests = 0, _errors = 0;
+    bool _udpListenerUp = false;
+    uint64_t _udpReceived = 0, _udpReplies = 0, _udpSendErrors = 0;
     std::atomic<uint32_t> _disconnects{0};
     double _responseMs = 0;
     bool _countersSaved = false;

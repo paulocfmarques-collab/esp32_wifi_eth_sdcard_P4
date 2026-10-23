@@ -16,9 +16,10 @@ static const char PROMETHEUS_FORM[] PROGMEM = R"PROM(
 <p class='hint'>As métricas de sistema, Wi-Fi, CPU, memória, GPIO e SD continuam disponíveis. Métricas sem hardware/integração retornam NaN, com esp_metric_available. Use up do Prometheus para detectar a placa offline.</p></article>
 <script>(()=>{
 const byId=id=>document.getElementById(id), form=byId('prometheus-form'), status=byId('prom-status'), save=byId('prom-save');
-let busy=false, loaded=false;
+let busy=false, loaded=false, streamPort=0;
 const validNumber=(value,min,max)=>/^[0-9]{1,5}$/.test(value)&&Number(value)>=min&&Number(value)<=max;
 function show(data){
+streamPort=Number(data.camera_stream_port)||0;
 byId('prom-host').value=data.host;byId('prom-port').value=String(data.port);byId('prom-interval').value=String(data.interval);byId('prom-yaml').value=data.scrape_config;
 byId('prom-saved').textContent='Servidor: '+(data.host||'nenhum salvo')+' · Porta de métricas: '+data.port+' · Interface web: 80';
 const endpoint=new URL('/metrics',window.location.href);endpoint.port=String(data.port);byId('prom-link').href=endpoint.href;
@@ -30,7 +31,7 @@ catch(error){status.textContent=error.message||'Falha ao ler preferências. Reca
 form.onsubmit=async event=>{
 event.preventDefault();if(busy||!loaded)return;
 const port=byId('prom-port').value, interval=byId('prom-interval').value, host=byId('prom-host').value.trim();
-if(!validNumber(port,1,65535)||Number(port)===3232||!validNumber(interval,5,3600)){status.textContent='Use porta 1–65535, exceto 3232, e intervalo de 5–3600 segundos.';return}
+if(!validNumber(port,1,65535)||Number(port)===3232||Number(port)===streamPort||!validNumber(interval,5,3600)){status.textContent='Use porta livre (exceto OTA e vídeo), com intervalo de 5–3600 segundos.';return}
 if(!host||host.length>253||!host.split('.').every(part=>part.length<=63&&/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(part))){status.textContent='Use um hostname ou IPv4, sem http://, caminho ou porta.';return}
 busy=true;save.disabled=true;status.textContent='Salvando e verificando…';
 try{

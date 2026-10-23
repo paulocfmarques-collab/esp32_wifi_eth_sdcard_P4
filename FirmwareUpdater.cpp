@@ -1,5 +1,6 @@
 #include "FirmwareUpdater.h"
 #include "PortalUi.h"
+#include "SystemLog.h"
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <ctype.h>
@@ -17,6 +18,7 @@ void FirmwareUpdater::begin(WebServer& server, OledDisplay& oled) {
     ArduinoOTA.setRebootOnSuccess(false);
     ArduinoOTA.setTimeout(10000);
     ArduinoOTA.onStart([this]() {
+      systemLog.record("OTA", "inicio Arduino IDE");
       _busy = true;
       _lastProgress = -1;
       if (ArduinoOTA.getCommand() != U_FLASH) { Update.abort(); return; }
@@ -26,11 +28,13 @@ void FirmwareUpdater::begin(WebServer& server, OledDisplay& oled) {
       if (total) progresso(uint64_t(done) * 100 / total);
     });
     ArduinoOTA.onEnd([this]() {
+      systemLog.record("OTA", "sucesso Arduino IDE; reinicio agendado");
       _oled->configurarProgresso(false, 0);
       _oled->adicionarLinha("OTA OK. Reiniciando");
       _restartAt = millis() + 1500;
     });
     ArduinoOTA.onError([this](ota_error_t error) {
+      systemLog.record("OTA", "falha Arduino IDE codigo=%u", unsigned(error));
       _busy = false; _oled->configurarProgresso(false, 0);
       Serial.printf("[OTA] Falha Arduino IDE: %u\n", unsigned(error));
     });
@@ -67,6 +71,7 @@ void FirmwareUpdater::page() {
 }
 
 void FirmwareUpdater::fail(const String& error) {
+  systemLog.record("OTA", "falha upload: %s", error.c_str());
   _error = error;
   if (_ownsUpload) { Update.abort(); _ownsUpload = false; }
   _busy = false; _oled->configurarProgresso(false, 0);
@@ -92,6 +97,7 @@ void FirmwareUpdater::upload() {
     }
     if (!Update.begin(_expected, U_FLASH)) { _error = Update.errorString(); return; }
     _busy = _ownsUpload = true; _lastChunkAt = millis();
+    systemLog.record("OTA", "inicio navegador bytes=%lu", (unsigned long)_expected);
     _lastProgress = -1;
     _oled->adicionarLinha("OTA navegador");
   } else if (file.status == UPLOAD_FILE_WRITE && _authorized && _ownsUpload && _error.isEmpty()) {
@@ -117,6 +123,7 @@ void FirmwareUpdater::complete() {
     fail(Update.errorString()); _server->send(400, "text/plain; charset=utf-8", _error); return;
   }
   _ownsUpload = false;
+  systemLog.record("OTA", "sucesso navegador bytes=%lu; reinicio agendado", (unsigned long)_received);
   _oled->configurarProgresso(false, 0);
   _server->send(200, "text/plain; charset=utf-8", "Firmware verificado e ativado. Reiniciando em instantes. Reabra o painel apos o reinicio.");
   _restartAt = millis() + 1500;

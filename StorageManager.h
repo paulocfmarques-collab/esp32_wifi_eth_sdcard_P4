@@ -17,6 +17,7 @@ class StorageManager
         bool mounted = false, logExists = false, logOk = false;
         uint64_t capacity = 0, total = 0, used = 0, logSize = 0, sampledAt = 0;
         uint64_t logWrites = 0, logErrors = 0, crashes = 0, crashErrors = 0;
+        uint64_t logRotations = 0;
     };
     const Telemetry& telemetry() const { return _telemetry; }
     void sampleTelemetry();
@@ -31,6 +32,7 @@ class StorageManager
     }
   private:
     Telemetry _telemetry;
+    bool rotateLog(size_t incoming);
 };
 
 #endif

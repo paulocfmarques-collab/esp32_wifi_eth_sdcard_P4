@@ -36,6 +36,7 @@ private:
   String _tmpS[NUM_REDES];
   String _tmpP[NUM_REDES];
   void (*_commandHandler)(String) = nullptr;
+  void (*_mqttCommandHandler)(String) = nullptr;
   String _httpResponse;
   bool _httpTruncated = false;
 
@@ -58,11 +59,13 @@ private:
   void carregarRedes(String ssids[NUM_REDES], String senhas[NUM_REDES], int& idx);
 
 public:
-  enum class CommandChannel { UDP, ConsoleSerial, HTTP };
+  enum class CommandChannel { UDP, ConsoleSerial, HTTP, MQTT };
   CommandChannel commandChannel = CommandChannel::UDP;
   void setCommandHandler(void (*handler)(String)) { _commandHandler = handler; }
+  void setMqttCommandHandler(void (*handler)(String)) { _mqttCommandHandler = handler; }
   void agendarReinicio() { _restartAt = millis() + 1500; _dadosProntosParaSalvar = true; }
   bool atualizacaoEmCurso() const { return _firmware.busy(); }
+  bool gravandoFirmware() const { return _firmware.writingFlash(); }
   String statusOTA() const { return _firmware.status(); }
   void imprimirCredenciaisOTA() const { _firmware.imprimirCredenciais(); }
   static bool ethConectado;
@@ -76,9 +79,11 @@ public:
   void configurarPrioridadeDeRede();
   
   WiFiUDP& getUdpDriver() { return _udp; }
+  void registrarPacoteUDP() { commandChannel = CommandChannel::UDP; _metrics.udpPacketReceived(); }
   void responderUDP(const String& msg);
   bool resetCounters() { return _metrics.resetCounters(); }
   const NetworkMonitor& monitor() const { return _monitor; }
+  uint16_t metricsPort() const { return _metrics.configuredPort(); }
   void zerarConfiguracoes();
   String listarSSIDs();
   bool adicionarRede(const String& ssid, const String& senha, String& erro);

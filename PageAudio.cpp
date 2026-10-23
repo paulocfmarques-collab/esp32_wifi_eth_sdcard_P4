@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "PageAudio.h"
+#include "SystemLog.h"
 #include "DeviceConfig.h"
 #include <Wire.h>
 #include <math.h>
@@ -26,6 +27,7 @@ bool PageAudio::readRegister(uint8_t reg, uint8_t& value) {
 }
 
 void PageAudio::fail(esp_err_t error) {
+    systemLog.record("AUDIO", "falha codigo=%d", int(error));
     _error.store(error); _ready.store(false);
     digitalWrite(AUDIO_AMP_ENABLE, LOW);
     Serial.printf("[AUDIO] Indisponivel: %s\n", esp_err_to_name(error));

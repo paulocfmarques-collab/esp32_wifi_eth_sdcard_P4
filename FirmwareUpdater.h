@@ -9,6 +9,7 @@ public:
   void begin(WebServer& server, OledDisplay& oled);
   void handle();
   bool busy() const { return _busy || _restartAt != 0; }
+  bool writingFlash() const { return _busy && !_restartAt; }
   void imprimirCredenciais() const;
   String status() const;
 private:

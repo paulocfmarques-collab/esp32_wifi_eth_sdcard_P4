@@ -11,6 +11,18 @@ OledDisplay::OledDisplay()
 {
 }
 
+bool OledDisplay::mostrarImagemCamera(const uint8_t* pixels, size_t size)
+{
+    if (!_inicializado || _exibirProgresso || !pixels || size != SCREEN_WIDTH * SCREEN_HEIGHT / 8) return false;
+    registrarAtividade();
+    memcpy(_display.getBuffer(), pixels, size);
+    _display.display();
+    _consoleAte = millis() + 10000;
+    _imagemCamera = true;
+    _ultimaPagina = millis();
+    return true;
+}
+
 void OledDisplay::inicializar()
 {
     Wire.begin(PIN_SDA, PIN_SCL);
@@ -26,6 +38,7 @@ void OledDisplay::inicializar()
 
 void OledDisplay::adicionarLinha(const String& novoTexto)
 {
+    _imagemCamera = false;
     Serial.println("[OLED Log] " + novoTexto);
     if (!_inicializado)
         return;
@@ -223,6 +236,8 @@ void OledDisplay::atualizarPainel(TimeManager& hora, NetworkController& rede, St
     if (!_inicializado)
         return;
     uint32_t now = millis();
+    if (_imagemCamera && !_exibirProgresso && int32_t(_consoleAte - now) > 0) return;
+    _imagemCamera = false;
     if (!_exibirProgresso && _protetorAutomatico && now - _ultimaAtividade >= _tempoProtetor)
         iniciarProtetor();
     if (_protetorAtivo) { desenharRobo(now); return; }

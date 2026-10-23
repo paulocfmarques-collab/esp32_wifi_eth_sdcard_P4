@@ -1,5 +1,88 @@
 # Changelog
 
+## 1.20.0 — 2026-10-22
+
+- Habilita USB Host HS com teclado/mouse HID e um pendrive MSC FAT, tarefa dedicada, montagem sem formatação e listagem limitada em cache.
+- Adiciona página /usb, APIs e comandos usb_status, usb_list, usb_rescan e log_status.
+- Amplia eventos no SD com fila limitada, metadados de rede/HTTP/UDP/MQTT/USB/câmera/OTA e resumos periódicos; filtra conteúdo sensível e captura avisos/erros SDK sem recursão de falhas SD.
+- Rotaciona /log.txt em 1 MiB com quatro históricos. Adiciona métricas USB e de descarte/rotação. Atualiza mapa e guias.
+- 75 testes passaram; sem compilação ou validação física USB/SD.
+
+
+## Documentação de hardware — 2026-10-22
+
+- Adiciona [MAPA_PINOS_E_ESQUEMA.md](MAPA_PINOS_E_ESQUEMA.md), com GPIOs explícitos/implícitos, mapa P6 de 40 pinos, esquema funcional e ligações de OLED, botão, áudio, câmera, Ethernet, SD e rádio.
+- Distingue sinais internos, funções não habilitadas e ligações externas não verificadas. Sem alteração de firmware ou compilação.
+
+
+## 1.19.1 — 2026-10-22
+
+- Amplia mqtt_status com tipo de erro, recusa do broker, errno de socket/transporte, desconexões, memória e estado da rede.
+
+- Remove transferência JPEG do ciclo da aplicação: /camera.jpg redireciona para /snapshot no servidor da câmera, com tarefa de envio limitada a um cliente.
+- Solicita encerramento de sessões TCP após completar requests assíncronos de foto/vídeo; mantém dois streams e limita fotos adicionais com 503.
+- Reduz captura/envio para 2 imagens/s, mantendo resolução/qualidade. Adiciona diagnóstico de clientes de foto, recusas e memória livre.
+- Documenta configuração direta /snapshot no Home Assistant e validação da coleta durante vídeo. 69 testes passaram; sem compilação nem confirmação física da correção.
+
+
+## 1.19.0 — 2026-10-22
+
+- Adiciona vídeo MJPEG em servidor separado, normalmente TCP81, com porta alternativa sem interferir no Prometheus salvo e até dois espectadores assíncronos.
+- Aumenta o limite de JPEG para 5 imagens/s e atualiza a página /camera para vídeo com pausa, reconexão e foto JPEG.
+- Adiciona camera_oled: quadro monocromático 128×64 com dithering, recorte central e exibição por 10 s; botão físico/tela:next sai antes.
+- Inclui atalho web e botão MQTT Camera no OLED, métricas de streaming e instruções MJPEG para Home Assistant.
+- Mantém partições OTA/flash 16 MB. 69 testes passaram; sem compilação ou teste físico do novo streaming/OLED.
+
+
+## 1.18.1 — 2026-10-22
+
+- Corrige a distribuição de flash para o firmware com câmera: partitions.csv para 16 MB, com dois aplicativos de 6,25 MiB e OTA preservado.
+- Mantém endereços de NVS/otadata, reserva SPIFFS e coredump e documenta migração por USB e opções Flash Size 16MB / Partition Scheme Custom.
+- Adiciona cinco testes de alinhamento, limites e capacidade da tabela; 65 testes passaram no total. Sem recompilação ou gravação.
+
+
+## 1.18.0 — 2026-10-22
+
+- Integra OV5647 MIPI-CSI por ESP_Video, reutilizando a Wire do OLED/codec e preservando GPIO27/áudio.
+- Captura em tarefa core 0, JPEG por hardware e cache protegido; inicialização automática com limpeza em falha.
+- Página /camera, imagem /camera.jpg e API/comando camera_status; visualização a cada segundo, pausa e aviso de imagem desatualizada.
+- Adiciona métricas de inicialização, disponibilidade, JPEGs, erros e idade; bloqueia snapshots e pausa worker durante OTA.
+- 60 testes da interface passaram; sem compilação nem validação física da câmera.
+
+
+## 1.17.0 — 2026-10-21
+
+- Adiciona motor local com quatro regras: CPU quente, heap baixo, rede indisponível e erros UDP em janela de 60 s.
+- Página /edge e API de configuração/estado, limites e tempos salvos em Preferences com verificação.
+- Confirmação de ativação/recuperação, histerese, intervalo mínimo entre alertas e pausa durante OTA.
+- Notificações Serial/SD, som opcional e histórico circular de 16 eventos em RAM; regras iniciam desativadas.
+- Comando edge_status, métricas Prometheus e alerta local com descoberta MQTT no Home Assistant.
+- 53 testes da interface passaram; sem compilação ou validação física do motor C++.
+
+
+## 1.16.0 — 2026-10-21
+
+- Adiciona cliente ESP-MQTT TCP assíncrono, configuração web /mqtt e API /api/mqtt/config, preferências verificadas e preservação/remoção explícita de senha.
+- Integra Home Assistant com descoberta por ID único, oito sensores, estado SD, LED, cinco botões de controle e evento do GPIO27.
+- Adiciona Last Will, reconexão, publicação em 30 s, estado desconhecido para dados inválidos, fila limitada e lista restrita de comandos sem retain.
+- mqtt_status e contadores MQTT reais no Prometheus. Interface e Prometheus mantêm portas anteriores.
+- 44 testes da interface passaram; firmware não compilado nem gravado.
+
+
+## 2026-10-21 — Formato parseável do help
+
+- Padronizada a resposta de `help` como `COMANDOS` seguido de um comando por
+  linha, incluindo aliases como itens individuais.
+- Atualizados o guia local e o catálogo geral.
+
+## 1.15.1 — 2026-10-19
+
+- Adiciona esp_udp_listener_up, esp_udp_packets_received_total, esp_udp_replies_sent_total e esp_udp_send_errors_total ao Prometheus.
+- Confere resultado das três aberturas do listener, escrita completa e conclusão dos envios.
+- Conta datagramas antes da validação e seleciona o canal UDP também para respostas a comandos grandes demais.
+- Documenta semântica e reinício dos contadores; não altera as preferências nem a porta web.
+
+
 ## 1.15.0 — 2026-10-19
 
 - Integra Open-Meteo de Porto Alegre, seguindo coordenadas e cadência do M5NanoC6.

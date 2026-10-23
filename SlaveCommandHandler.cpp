@@ -5,6 +5,11 @@
 #include "CpuTemperature.h"
 #include "PageAudio.h"
 #include "WeatherService.h"
+#include "MqttService.h"
+#include "EdgeComputing.h"
+#include "CameraService.h"
+#include "UsbHostService.h"
+#include "SystemLog.h"
 
 #include "FirmwareVersion.h"
 
@@ -273,6 +278,30 @@ void SlaveCommandHandler::executarInterno(String cmd)
         }
         _net.responderUDP(_oled.statusProtetor());
     }
+    else if (nome == "usb_status") { _net.responderUDP(usbHost.status() + "\n"); }
+    else if (nome == "usb_list") { _net.responderUDP(usbHost.files()); }
+    else if (nome == "usb_rescan") { usbHost.rescan(); _net.responderUDP("Releitura da raiz solicitada; consulte usb_list em instantes\n"); }
+    else if (nome == "log_status") { _net.responderUDP(systemLog.status() + "\n"); }
+    else if (nome == "camera_oled")
+    {
+        uint8_t pixels[1024];
+        if (!arg.isEmpty()) _net.responderUDP("Use camera_oled sem argumentos\n");
+        else if (!camera.copyOled(pixels, sizeof(pixels))) _net.responderUDP("Camera sem imagem recente; consulte camera_status\n");
+        else if (!_oled.mostrarImagemCamera(pixels, sizeof(pixels))) _net.responderUDP("OLED indisponivel ou ocupado\n");
+        else _net.responderUDP("Quadro da camera no OLED por 10 s. Botao ou tela:next para sair.\n");
+    }
+    else if (nome == "camera_status")
+    {
+        _net.responderUDP(camera.status() + "\n");
+    }
+    else if (nome == "edge_status")
+    {
+        _net.responderUDP(edge.status() + "\n");
+    }
+    else if (nome == "mqtt_status")
+    {
+        _net.responderUDP(mqtt.status());
+    }
     else if (nome == "weather_status")
     {
         _net.responderUDP(weather.status());
@@ -411,23 +440,95 @@ void SlaveCommandHandler::executarInterno(String cmd)
     else if (nome == "help")
     {
         _net.responderUDP(
-            "Sistema: help info status version build reason crash_info alive cores ota_info name "
-            "ota_password(serial) uptime lastcmd cmdcount reboot reset_counters\n"
-            "Diagnostico: health selftest temp cpu chip_info ram heap heap_min psram flash "
+            "COMANDOS\n"
+            "help\n"
+            "info\n"
+            "status\n"
+            "version\n"
+            "build\n"
+            "reason\n"
+            "crash_info\n"
+            "alive\n"
+            "cores\n"
+            "ota_info\n"
+            "name\n"
+            "ota_password\n"
+            "uptime\n"
+            "lastcmd\n"
+            "cmdcount\n"
+            "reboot\n"
+            "reset_counters\n"
+            "health\n"
+            "selftest\n"
+            "temp\n"
+            "cpu\n"
+            "chip_info\n"
+            "ram\n"
+            "heap\n"
+            "heap_min\n"
+            "psram\n"
+            "flash\n"
             "flash_info\n"
-            "Rede: net_info net_monitor eth_status mac rssi ip ssid channel wifi_status wifi_list "
-            "wifi_add:SSID|SENHA reset_wifi\n"
-            "OLED: tela:0..5 tela:next tela:auto botao_status protetor:on|off|auto|status|tempo:SEGUNDOS\n"
-            "Audio: audio_status audio_test\nClima: weather_status (Open-Meteo Porto Alegre)\n"
-            "Hora: time date ntp_status set_fuso:N dst_on dst_off dst:0|1\n"
-            "LED: led_on led_off led_blink[:duracao_ms]\n"
-            "SD: sd_status sd_list sd_read:arquivo sd_write:arquivo:texto sd_append:arquivo:texto "
-            "sd_del:arquivo sd_exists:arquivo sd_size:arquivo sd_tail:arquivo[:linhas] "
-            "sd_log[:linhas] sd_clear_log sd_mkdir:pasta sd_rmdir:pasta\n"
-            "wifi_add: lista circular de 5 redes; senha vazia = rede aberta; aplique com reboot.\n"
-            "Aliases: init=reason restart=reboot list=sd_list read=sd_read write=sd_write "
-            "delete=sd_del exists=sd_exists size=sd_size tail=sd_tail sd_info=sd_status "
-            "set_tz=set_fuso set_dst=dst\n");
+            "net_info\n"
+            "net_monitor\n"
+            "eth_status\n"
+            "mac\n"
+            "rssi\n"
+            "ip\n"
+            "ssid\n"
+            "channel\n"
+            "wifi_status\n"
+            "wifi_list\n"
+            "wifi_add:SSID|SENHA\n"
+            "reset_wifi\n"
+            "tela:0..5\n"
+            "tela:[next]\n"
+            "tela:[auto]\n"
+            "botao_status\n"
+            "protetor:on|off|auto|status|tempo:SEGUNDOS\n"
+            "audio_status\n"
+            "audio_test\n"
+            "weather_status\n"
+            "mqtt_status\n"
+            "edge_status\n"
+            "camera_status\n"
+            "camera_oled\n"
+            "usb_status\nusb_list\nusb_rescan\nlog_status\n"
+            "time\n"
+            "date\n"
+            "ntp_status\n"
+            "set_fuso:N\n"
+            "dst_on\n"
+            "dst_off\n"
+            "dst:0|1\n"
+            "led_on\n"
+            "led_off\n"
+            "led_blink[:duracao_ms]\n"
+            "sd_status\n"
+            "sd_list\n"
+            "sd_read:arquivo\n"
+            "sd_write:arquivo:texto\n"
+            "sd_append:arquivo:texto\n"
+            "sd_del:arquivo\n"
+            "sd_exists:arquivo\n"
+            "sd_size:arquivo\n"
+            "sd_tail:arquivo[:linhas]\n"
+            "sd_log[:linhas]\n"
+            "sd_clear_log\n"
+            "sd_mkdir:pasta\n"
+            "sd_rmdir:pasta\n"
+            "init\n"
+            "restart\n"
+            "list\n"
+            "read\n"
+            "write\n"
+            "delete\n"
+            "exists\n"
+            "size\n"
+            "tail\n"
+            "sd_info\n"
+            "set_tz\n"
+            "set_dst\n");
     }
     else if (nome == "name")
     {

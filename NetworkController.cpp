@@ -1,5 +1,11 @@
 #include "NetworkController.h"
 #include "PortalUi.h"
+#include "MqttService.h"
+#include "EdgeComputing.h"
+#include "CameraService.h"
+#include "SystemLog.h"
+#include "UsbHostService.h"
+#include "CpuTemperature.h"
 #include <ctype.h>
 
 NetworkController* NetworkController::_instance = nullptr;
@@ -15,6 +21,8 @@ void NetworkController::inicializar()
   _networkEvents = xQueueCreate(16, sizeof(arduino_event_id_t));
   WiFi.onEvent(onNetworkEvent);
   _metrics.begin();
+  mqtt.begin();
+  edge.begin();
 }
 
 void NetworkController::onNetworkEvent(arduino_event_id_t event, arduino_event_info_t info) {
@@ -99,7 +107,7 @@ bool NetworkController::conectarWifi() {
       _prefs.putInt("idx", i);
       _prefs.end();
       WiFi.scanDelete();
-      _udp.begin(UDP_PORTA);
+      _metrics.udpListenerOpened(_udp.begin(UDP_PORTA) == 1);
       configurarRotas();
       return true;
     }
@@ -114,6 +122,9 @@ void NetworkController::configurarRotas() {
     uint64_t started = esp_timer_get_time();
     bool result = next();
     _metrics.recordRequest(started, server.responseCode() >= 400);
+    String path = server.uri();
+    if (path != "/metrics" && path != "/api/dashboard")
+      systemLog.record("HTTP", "%s status=%d tempo_ms=%lu", path.substring(0,80).c_str(), server.responseCode(), (unsigned long)((esp_timer_get_time()-started)/1000));
     return result;
   });
   const char* headers[] = {"X-ESP32-Command", "X-ESP32-Firmware"};
@@ -143,6 +154,13 @@ void NetworkController::configurarRotas() {
     _server.send(200, "text/plain; charset=utf-8", _metrics.scrapeConfiguration());
   });
   _firmware.begin(_server, _oled);
+  mqtt.routes(_server, []() { return !_instance || _instance->_dadosProntosParaSalvar || _instance->_firmware.busy(); });
+  edge.routes(_server, []() { return !_instance || _instance->_dadosProntosParaSalvar || _instance->_firmware.busy(); });
+  camera.routes(_server, []() { return !_instance || _instance->_dadosProntosParaSalvar || _instance->_firmware.busy(); });
+  _server.on("/usb", HTTP_GET, [this]() { _server.sendHeader("Cache-Control", "no-store"); _server.send(200, "text/html; charset=utf-8", portalStart("USB", false, false, false, false, false, false, true) + FPSTR(USB_VIEW) + portalEnd()); });
+  _server.on("/api/usb/status", HTTP_GET, [this]() { _server.sendHeader("Cache-Control", "no-store"); _server.send(200, "application/json", usbHost.status()); });
+  _server.on("/api/usb/files", HTTP_GET, [this]() { _server.sendHeader("Cache-Control", "no-store"); _server.send(200, "text/plain; charset=utf-8", usbHost.files()); });
+  _server.on("/api/log/status", HTTP_GET, [this]() { _server.sendHeader("Cache-Control", "no-store"); _server.send(200, "application/json", systemLog.status()); });
   _server.begin();
   _rotasOk = true;
 }
@@ -151,7 +169,7 @@ void NetworkController::iniciarPortal()
 {
   WiFi.mode(WIFI_AP);
   WiFi.softAP("ESP32_P4_CONFIG");
-  _udp.begin(UDP_PORTA);
+  _metrics.udpListenerOpened(_udp.begin(UDP_PORTA) == 1);
   _oled.adicionarLinha("Portal Ativo!");
   _oled.adicionarLinha("IP: 192.168.4.1");
   configurarRotas();
@@ -397,11 +415,14 @@ void NetworkController::processarPortalERedes()
 {
   arduino_event_id_t event;
   while (_networkEvents && xQueueReceive(_networkEvents, &event, 0) == pdTRUE) {
+    systemLog.record("REDE", "evento=%d", int(event));
     switch (event) {
       case ARDUINO_EVENT_ETH_START: _oled.adicionarLinha("ETH inicializada"); break;
+      case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        systemLog.record("REDE", "WiFi IP=%s", WiFi.localIP().toString().c_str()); break;
       case ARDUINO_EVENT_ETH_CONNECTED: _oled.adicionarLinha("Cabo ETH conectado"); break;
       case ARDUINO_EVENT_ETH_GOT_IP:
-        ethConectado = true; _udp.begin(UDP_PORTA);
+        ethConectado = true; _metrics.udpListenerOpened(_udp.begin(UDP_PORTA) == 1);
         _oled.adicionarLinha("ETH: " + ETH.localIP().toString()); break;
       case ARDUINO_EVENT_ETH_DISCONNECTED:
       case ARDUINO_EVENT_ETH_STOP:
@@ -416,7 +437,25 @@ void NetworkController::processarPortalERedes()
   _monitor.update(WiFi.status() == WL_CONNECTED, ethConectado);
   _server.handleClient();
   if (!_firmware.busy()) _storage.sampleTelemetry();
+  edge.handle(_storage, _firmware.busy() || _dadosProntosParaSalvar,
+              WiFi.status() == WL_CONNECTED || ethConectado, _metrics.udpSendErrors());
   _metrics.handle(_firmware.busy());
+  mqtt.handle(_storage, _firmware.busy() || _dadosProntosParaSalvar, _mqttCommandHandler);
+  static uint32_t nextSummary = 0;
+  if (!_firmware.busy() && int32_t(millis() - nextSummary) >= 0) {
+    nextSummary = millis() + 60000;
+    systemLog.record("SISTEMA", "heap=%lu min_heap=%lu psram=%lu cpu=%.1f tarefas=%u wifi=%d eth=%d mqtt=%d rssi=%d",
+      (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getFreePsram(),
+      readCpuTemperatureCelsius(), unsigned(uxTaskGetNumberOfTasks()), WiFi.status()==WL_CONNECTED, ethConectado, mqtt.connected(), WiFi.RSSI());
+    systemLog.record("CONTADORES", "udp_rx=%llu udp_tx=%llu udp_erros=%llu mqtt_tx=%lu mqtt_erros=%lu jpeg=%lu stream=%lu usb_reports=%lu log_drop=%lu",
+      (unsigned long long)_metrics.udpReceived(), (unsigned long long)_metrics.udpReplies(), (unsigned long long)_metrics.udpSendErrors(),
+      (unsigned long)mqtt.sent(), (unsigned long)mqtt.errors(), (unsigned long)camera.frames(), (unsigned long)camera.streamFrames(),
+      (unsigned long)usbHost.reports(), (unsigned long)systemLog.dropped());
+    const auto& card = _storage.telemetry();
+    systemLog.record("SD", "montado=%d total=%llu usado=%llu log_writes=%llu log_errors=%llu rotacoes=%llu",
+      card.mounted, (unsigned long long)card.total, (unsigned long long)card.used,
+      (unsigned long long)card.logWrites, (unsigned long long)card.logErrors, (unsigned long long)card.logRotations);
+  }
   if (!_dadosProntosParaSalvar) _firmware.handle();
   if (_dadosProntosParaSalvar && int32_t(millis()-_restartAt)>=0) ESP.restart();
 }
@@ -433,6 +472,7 @@ void NetworkController::configurarPrioridadeDeRede()
 
 void NetworkController::responderUDP(const String& msg) 
 {
+  if (commandChannel == CommandChannel::MQTT) return; // State is published separately; never reply via UDP.
   if (commandChannel == CommandChannel::ConsoleSerial) { Serial.print(msg); return; }
   if (commandChannel == CommandChannel::HTTP) {
     const size_t remaining = 8192 - _httpResponse.length();
@@ -440,11 +480,16 @@ void NetworkController::responderUDP(const String& msg)
     _httpResponse += msg.substring(0, remaining);
     return;
   }
-  if (_udp.remoteIP()) {
-    _udp.beginPacket(_udp.remoteIP(), _udp.remotePort());
-    _udp.print(msg);
-    _udp.endPacket();
+  if (!_udp.remoteIP() || !_udp.remotePort() ||
+      _udp.beginPacket(_udp.remoteIP(), _udp.remotePort()) != 1) {
+    _metrics.udpReplyResult(false);
+    systemLog.record("UDP", "falha ao iniciar resposta");
+    return;
   }
+  const size_t written = _udp.print(msg);
+  const bool sent = _udp.endPacket() == 1;
+  _metrics.udpReplyResult(sent && written == msg.length());
+  systemLog.record("UDP", "resposta bytes=%u sucesso=%d", unsigned(written), sent && written == msg.length());
 }
 
 void NetworkController::zerarConfiguracoes() 

@@ -6,6 +6,12 @@
 #include "SlaveCommandHandler.h"
 #include "PageAudio.h"
 #include "WeatherService.h"
+#include "MqttService.h"
+#include "CameraService.h"
+#include "SystemLog.h"
+#include "UsbHostService.h"
+#include "FirmwareVersion.h"
+#include <esp_system.h>
 
 OledDisplay oled;
 StorageManager storage;
@@ -28,10 +34,15 @@ static void applicationLoop(void*)
 void setup()
 {
     Serial.begin(115200);
+    systemLog.begin();
+    systemLog.record("BOOT", "firmware=%s reset_reason=%d", FIRMWARE_VERSION, int(esp_reset_reason()));
     cmdHandler.iniciarSerial();
     network.setCommandHandler(
         [](String command)
         { cmdHandler.executar(command, NetworkController::CommandChannel::HTTP); });
+    network.setMqttCommandHandler(
+        [](String command)
+        { cmdHandler.executar(command, NetworkController::CommandChannel::MQTT); });
     delay(500);
 
     pinMode(LED_PIN, OUTPUT);
@@ -41,6 +52,7 @@ void setup()
     pageAudio.begin();
     oled.aoTrocarPagina([]() { pageAudio.play(); });
     storage.inicializar();
+    systemLog.record("SD", "montado=%d", storage.isAtivo());
     network.inicializar();
     network.ativarEthernetFisica();
     localTime.carregarEConfigurarHorario();
@@ -75,6 +87,9 @@ void setup()
         network.iniciarPortal();
     }
     oled.paginasAutomaticas();
+    camera.begin();
+    camera.startStreaming(network.metricsPort());
+    usbHost.begin();
     weather.begin();
     if (xTaskCreatePinnedToCore(applicationLoop, "device_app", 12288, nullptr, 1, &applicationTask,
                                 1) != pdPASS)
@@ -94,7 +109,9 @@ void loop()
 void executarCiclo()
 {
     network.processarPortalERedes();
+    systemLog.process(storage, network.gravandoFirmware());
     pageAudio.suspend(network.atualizacaoEmCurso());
+    camera.suspend(network.atualizacaoEmCurso());
     weather.suspend(network.atualizacaoEmCurso());
     if (network.atualizacaoEmCurso())
         return;
@@ -107,6 +124,8 @@ void executarCiclo()
     int packetSize = udp.parsePacket();
     if (packetSize)
     {
+        systemLog.record("UDP", "recebido bytes=%d", packetSize);
+        network.registrarPacoteUDP();
         char packetBuffer[255];
         if (packetSize >= int(sizeof(packetBuffer)))
         {
@@ -133,7 +152,10 @@ void executarCiclo()
     {
         stable = reading;
         if (stable == LOW)
+        {
             oled.avancarPagina();
+            mqtt.buttonPressed();
+        }
     }
     readingBefore = reading;
 }

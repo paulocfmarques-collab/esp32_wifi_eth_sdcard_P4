@@ -1,5 +1,6 @@
 #include "StorageManager.h"
 #include "time.h"
+#include "SystemLog.h"
 
 StorageManager::StorageManager() : _sdcardOk(false)
 {
@@ -160,18 +161,34 @@ void StorageManager::gravarLog(const String& mensagem)
         sprintf(bufferCarimbo, "[Sem Hora Sinc.] ");
     }
 
+    String safe = SystemLog::sanitize(mensagem);
+    if (!rotateLog(strlen(bufferCarimbo) + safe.length() + 2)) { ++_telemetry.logErrors; return; }
     File arquivoLog = SD_MMC.open("/log.txt", FILE_APPEND);
     if (arquivoLog)
     {
         size_t written = arquivoLog.print(bufferCarimbo);
-        written += arquivoLog.println(mensagem);
-        if (written == strlen(bufferCarimbo) + mensagem.length() + 2)
+        written += arquivoLog.println(safe);
+        if (written == strlen(bufferCarimbo) + safe.length() + 2)
             ++_telemetry.logWrites;
         else ++_telemetry.logErrors;
         arquivoLog.close();
 
         Serial.print(F("[SD LOG] "));
         Serial.print(bufferCarimbo);
-        Serial.println(mensagem);
+        Serial.println(safe);
     } else ++_telemetry.logErrors;
+}
+
+bool StorageManager::rotateLog(size_t incoming) {
+    File current = SD_MMC.open("/log.txt", FILE_READ);
+    if (!current) return !SD_MMC.exists("/log.txt");
+    size_t size = current.size(); current.close();
+    if (size + incoming <= 1048576) return true;
+    if (SD_MMC.exists("/log.4.txt") && !SD_MMC.remove("/log.4.txt")) return false;
+    for (int i = 3; i >= 1; --i) {
+        String from = "/log." + String(i) + ".txt", to = "/log." + String(i+1) + ".txt";
+        if (SD_MMC.exists(from) && !SD_MMC.rename(from, to)) return false;
+    }
+    if (!SD_MMC.rename("/log.txt", "/log.1.txt")) return false;
+    ++_telemetry.logRotations; return true;
 }

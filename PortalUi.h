@@ -9,7 +9,7 @@ static const char PORTAL_CONSOLE[] PROGMEM = R"CONSOLE(
 <div class='actions'><span class='badge ok' id='live-state' role='status'>Painel conectado</span><button class='secondary' id='pause-live' type='button'>Pausar atualização</button><small id='live-time'>Atualização a cada 5 segundos</small></div>
 <article class='card section' id='terminal'><div class='net-title'><div><div class='eyebrow'>Controle do dispositivo</div><h2>Terminal de comandos</h2></div><span class='badge'>USB · UDP · Web</span></div>
 <p class='muted'>Consulte o estado, controle o LED e explore os arquivos usando os mesmos comandos da serial.</p>
-<div class='actions' id='quick-commands'><button type='button' class='secondary' data-command='status'>Estado</button><button type='button' class='secondary' data-command='health'>Diagnóstico</button><button type='button' class='secondary' data-command='tela:auto'>Telas automáticas</button><button type='button' class='secondary' data-command='protetor:on'>Carinhas de robô</button><button type='button' class='secondary' data-command='audio_test'>Testar som</button><button type='button' class='secondary' data-command='weather_status'>Clima externo</button><button type='button' class='secondary' data-command='led_on'>Ligar LED</button><button type='button' class='secondary' data-command='led_off'>Desligar LED</button><button type='button' class='secondary' data-command='tela:next'>Próxima tela</button><button type='button' class='secondary' data-command='sd_list'>Arquivos SD</button><button type='button' class='secondary' data-command='help'>Ajuda</button></div>
+<div class='actions' id='quick-commands'><button type='button' class='secondary' data-command='status'>Estado</button><button type='button' class='secondary' data-command='health'>Diagnóstico</button><button type='button' class='secondary' data-command='tela:auto'>Telas automáticas</button><button type='button' class='secondary' data-command='protetor:on'>Carinhas de robô</button><button type='button' class='secondary' data-command='audio_test'>Testar som</button><button type='button' class='secondary' data-command='camera_oled'>Câmera no OLED</button><button type='button' class='secondary' data-command='weather_status'>Clima externo</button><button type='button' class='secondary' data-command='led_on'>Ligar LED</button><button type='button' class='secondary' data-command='led_off'>Desligar LED</button><button type='button' class='secondary' data-command='tela:next'>Próxima tela</button><button type='button' class='secondary' data-command='sd_list'>Arquivos SD</button><button type='button' class='secondary' data-command='help'>Ajuda</button></div>
 <pre id='console-output' role='log' aria-label='Respostas dos comandos' tabindex='0'>Pronto. Digite help para listar os comandos.
 </pre><form id='command-form'><label class='field' for='command-input'>Comando</label><div class='command-line'><input type='text' id='command-input' autocomplete='off' spellcheck='false' placeholder='Ex.: status ou sd_tail:/log.txt:10' maxlength='254' required><button id='command-send' type='submit'>Enviar</button></div></form>
 <div class='actions'><button type='button' class='secondary' id='clear-console'>Limpar terminal</button><small>Serial USB: 115200 baud · Termine cada comando com Enter (LF ou CR).</small></div><p class='hint'>O terminal controla este dispositivo pela rede local. Comandos que alteram arquivos ou configurações pedem confirmação. Respostas web limitadas a 8 KB.</p></article>
@@ -100,7 +100,121 @@ el('log-auto').onchange=()=>{if(el('log-auto').checked)load()};el('log-follow').
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});setInterval(load,5000);load(true);
 })();</script>)LOGS";
 
-static String portalStart(const char* title, bool wifi, bool logs = false, bool prometheus = false)
+static const char MQTT_FORM[] PROGMEM = R"MQTT(
+<form id='mqtt-form'><fieldset id='mqtt-fields' disabled>
+<label><input id='mqtt-enabled' type='checkbox'> Ativar MQTT</label>
+<label>Servidor MQTT<input id='mqtt-host' maxlength='253' placeholder='192.168.0.10' autocomplete='off'></label>
+<label>Porta<input id='mqtt-port' type='number' min='1' max='65535' value='1883' required></label>
+<label>Usuário<input id='mqtt-user' maxlength='128' autocomplete='username'></label>
+<label>Senha<input id='mqtt-password' type='password' maxlength='128' autocomplete='new-password' placeholder='Deixe vazio para manter'></label>
+<label><input id='mqtt-clear' type='checkbox'> Apagar senha salva</label>
+<button id='mqtt-save' type='submit'>Salvar MQTT</button></fieldset></form>
+<p id='mqtt-result' role='status' aria-live='polite'>Carregando configuração…</p>
+<p>A integração MQTT deve usar o mesmo broker no Home Assistant. A senha salva não é devolvida à página.</p>
+<script>(()=>{'use strict';
+const el=id=>document.getElementById('mqtt-'+id); let loaded=false,busy=false;
+const show=c=>{el('enabled').checked=c.enabled;el('host').value=c.host;el('port').value=c.port;el('user').value=c.user;el('password').value='';el('clear').checked=false;
+el('result').textContent=(c.connected?'Conectado. ':'Desconectado. ')+(c.password_set?'Senha salva. ':'Sem senha salva. ')+'Tópico: '+c.base_topic;};
+async function load(){try{const r=await fetch('/api/mqtt/config',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error('Falha ao carregar');show(await r.json());loaded=true;el('fields').disabled=false;}catch(e){el('result').textContent='Não foi possível carregar. Recarregue a página antes de salvar.';}}
+el('form').onsubmit=async e=>{e.preventDefault();if(!loaded||busy)return;
+const host=el('host').value.trim(),port=el('port').value;
+if((host&&!/^[a-zA-Z0-9.-]{1,253}$/.test(host))||(el('enabled').checked&&!host)||!/^\d{1,5}$/.test(port)||Number(port)<1||Number(port)>65535){el('result').textContent='Confira servidor e porta.';return;}
+busy=true;el('save').disabled=true;
+const body=new URLSearchParams({enabled:el('enabled').checked?'1':'0',host,port,user:el('user').value,password:el('password').value,clear_password:el('clear').checked?'1':'0'});
+try{const r=await fetch('/api/mqtt/config',{method:'POST',headers:{'X-ESP32-Command':'1'},body,signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error(await r.text());show(await r.json());el('result').textContent+=' Configuração salva. Aguarde a reconexão e recarregue para conferir o estado.';}
+catch(e){el('result').textContent='Não foi possível confirmar: '+e.message+'. Recarregue para conferir o que ficou salvo.';}
+finally{busy=false;el('save').disabled=false;}};load();})();</script>
+)MQTT";
+
+static const char EDGE_FORM[] PROGMEM = R"EDGE(
+<form id='edge-form'><fieldset id='edge-fields' disabled>
+<label><input id='edge-enabled' type='checkbox'> Ativar regras locais</label>
+<label>Alerta de CPU a partir de (°C)<input id='edge-cpu_limit' type='number' min='20' max='100' required></label>
+<label>Alerta de memória livre abaixo de (bytes)<input id='edge-heap_limit' type='number' min='8192' max='1048576' required></label>
+<label>Falhas de envio UDP em 60 segundos<input id='edge-udp_limit' type='number' min='1' max='10000' required></label>
+<label>Confirmar condição por (segundos)<input id='edge-confirm_seconds' type='number' min='1' max='600' required></label>
+<label>Intervalo mínimo entre alertas da mesma regra (segundos)<input id='edge-cooldown_seconds' type='number' min='30' max='86400' required></label>
+<label><input id='edge-sound' type='checkbox'> Emitir som nos alertas</label>
+<button id='edge-save' type='submit'>Salvar regras</button></fieldset></form>
+<p id='edge-result' role='status' aria-live='polite'>Carregando regras…</p>
+<p>As regras começam desativadas. Rede e UDP aguardam 60 segundos para formar a primeira janela. A recuperação também exige confirmação: CPU 3 °C abaixo do limite e memória 8192 bytes acima. Salvar reinicia as avaliações e os alertas ativos.</p>
+<h2>Estado das regras</h2><pre id='edge-status'>Carregando estado…</pre>
+<h2>Últimos eventos</h2><pre id='edge-history'>Carregando histórico…</pre>
+<script>(()=>{'use strict';
+const el=id=>document.getElementById('edge-'+id),limits={cpu_limit:[20,100],heap_limit:[8192,1048576],udp_limit:[1,10000],confirm_seconds:[1,600],cooldown_seconds:[30,86400]};
+const names={cpu_hot:'CPU quente',heap_low:'Memória baixa',network_down:'Rede indisponível',udp_errors:'Falhas UDP'};
+let loaded=false,busy=false;
+function show(c){el('enabled').checked=c.enabled;el('sound').checked=c.sound;for(const key of Object.keys(limits))el(key).value=c[key];}
+async function status(){if(document.hidden)return;try{const r=await fetch('/api/edge/status',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error();const s=await r.json();
+el('status').textContent=(s.enabled?'Regras ativadas':'Regras desativadas')+(s.paused?' · Pausadas durante atualização':'')+'\n'+s.rules.map(r=>(names[r.rule]||r.rule)+': '+(!r.valid?'aguardando dados':r.active?'ALERTA':'normal')+(r.pending?' · confirmando mudança':'')).join('\n');
+el('history').textContent=s.history.length?s.history.map(e=>'#'+e.sequence+' · '+e.uptime+' s ligado · '+(names[e.rule]||e.rule)+' · '+(e.active?'ALERTA':'RECUPERADO')).join('\n'):'Nenhum evento neste boot.';
+}catch(e){el('status').textContent='Não foi possível atualizar. Os dados anteriores podem estar desatualizados.';}}
+async function load(){try{const r=await fetch('/api/edge/config',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error();show(await r.json());loaded=true;el('fields').disabled=false;el('result').textContent='Configuração carregada.';}catch(e){el('result').textContent='Falha ao carregar. Recarregue antes de salvar.';}}
+el('form').onsubmit=async e=>{e.preventDefault();if(!loaded||busy)return;
+const body=new URLSearchParams({enabled:el('enabled').checked?'1':'0',sound:el('sound').checked?'1':'0'});
+for(const [key,[min,max]]of Object.entries(limits)){const value=String(el(key).value);if(!/^\d{1,8}$/.test(value)||Number(value)<min||Number(value)>max){el('result').textContent='Confira limites e tempos.';return;}body.set(key,value);}
+busy=true;el('save').disabled=true;
+try{const r=await fetch('/api/edge/config',{method:'POST',headers:{'X-ESP32-Command':'1'},body,signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error(await r.text());show(await r.json());el('result').textContent='Regras salvas. Avaliação reiniciada.';await status();}
+catch(e){el('result').textContent='Não foi possível confirmar: '+e.message+'. Recarregue para conferir o que ficou salvo.';}
+finally{busy=false;el('save').disabled=false;}};load();status();setInterval(status,5000);})();</script>
+)EDGE";
+
+static const char CAMERA_VIEW[] PROGMEM = R"CAMERA(
+<div class='actions'><button id='camera-live' type='button'>Iniciar vídeo</button><button id='camera-refresh' type='button' class='secondary'>Foto JPEG</button><button id='camera-pause' type='button' class='secondary'>Pausar visualização</button><a href='/camera.jpg' target='_blank' rel='noopener'>Abrir JPEG</a><a id='camera-stream-link' target='_blank' rel='noopener'>Abrir streaming</a></div>
+<p id='camera-result' role='status' aria-live='polite'>Aguardando imagem…</p>
+<p>Endereço do vídeo para o Home Assistant: <code id='camera-url'>aguardando…</code></p>
+<img id='camera-image' alt='Imagem da câmera OV5647' style='display:block;max-width:100%;height:auto;border-radius:12px'>
+<script>(()=>{'use strict';
+const el=id=>document.getElementById('camera-'+id);let paused=false,busy=false,previous=null,mode='live',streaming=false,retryAt=0;
+function stop(){el('image').removeAttribute('src');streaming=false;if(previous){URL.revokeObjectURL(previous);previous=null;}}
+async function video(){if(busy||paused||document.hidden)return;busy=true;
+try{const r=await fetch('/api/camera/status',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error('Não foi possível consultar a câmera');const s=await r.json();
+if(!Number.isInteger(s.stream_port)||s.stream_port<1||s.stream_port>65535)throw Error('Servidor de vídeo indisponível; consulte camera_status');
+const url=new URL('/stream',window.location.href);url.port=String(s.stream_port);el('url').textContent=url.href;el('stream-link').href=url.href;
+if(!s.available)throw Error('Câmera ainda sem imagem recente ou pausada');
+if(paused||document.hidden||mode!=='live')return;stop();url.searchParams.set('t',String(Date.now()));streaming=true;el('image').src=url.href;el('result').textContent='Conectando ao vídeo MJPEG…';}
+catch(e){streaming=false;retryAt=Date.now()+3000;el('result').textContent=e.message+'. Nova tentativa automática em alguns segundos.';}
+finally{busy=false;}}
+el('image').onload=()=>{if(mode==='live'&&streaming)el('result').textContent='Vídeo MJPEG ativo · até 2 imagens por segundo.';};
+el('image').onerror=()=>{if(mode==='live'&&!paused){stop();retryAt=Date.now()+3000;el('result').textContent='Vídeo interrompido ou limite de espectadores atingido. Reconectando…';}};
+async function refresh(manual=false){if(busy||document.hidden||(!manual&&paused))return;busy=true;el('refresh').disabled=true;
+if(manual){mode='snapshot';stop();}
+try{const r=await fetch('/camera.jpg',{cache:'no-store',signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error(await r.text());
+const blob=await r.blob();if(blob.type!=='image/jpeg'||!blob.size)throw Error('Resposta sem imagem JPEG');
+if(document.hidden)return;
+const url=URL.createObjectURL(blob);el('image').src=url;if(previous)URL.revokeObjectURL(previous);previous=url;
+el('result').textContent='Imagem atualizada. '+(paused?'Visualização pausada.':'Atualização a cada segundo.');}
+catch(e){el('result').textContent='Sem imagem recente: '+e.message+'. A imagem anterior, se houver, está desatualizada. Consulte camera_status.';}
+finally{busy=false;el('refresh').disabled=false;}}
+el('live').onclick=()=>{mode='live';paused=false;retryAt=0;el('pause').textContent='Pausar visualização';stop();video();};
+el('refresh').onclick=()=>refresh(true);el('pause').onclick=()=>{paused=!paused;el('pause').textContent=paused?'Retomar visualização':'Pausar visualização';if(paused){if(mode==='live')stop();el('result').textContent='Visualização pausada. A captura na placa continua.';}else if(mode==='live')video();else refresh();};
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(mode==='live')stop();}else if(mode==='live')video();else refresh();});
+window.addEventListener('pagehide',stop);
+video();setInterval(()=>{if(mode==='live'){if(!streaming&&Date.now()>=retryAt)video();}else refresh();},1000);})();</script>
+)CAMERA";
+
+static const char USB_VIEW[] PROGMEM = R"USBVIEW(
+<header class='page-header'><h1>USB Host e registros</h1></header><section class='card'>
+<p>Teclado, mouse e um pendrive FAT16/FAT32. Jumper DEVICE: portas 2–4 via hub; HOST: somente porta 1 direta. USB-C de programação permanece separado. O pendrive não é formatado e não recebe os logs: eles continuam no SD.</p>
+<p>Relatórios de teclado/mouse são contados; texto e teclas não são gravados nem executados como comandos.</p>
+<button id='usb-refresh' type='button'>Atualizar estado</button><button id='usb-rescan' type='button' class='secondary'>Reler raiz do pendrive</button>
+<p id='usb-message' role='status' aria-live='polite'></p><pre id='usb-status'>Carregando…</pre>
+<h2>Raiz do pendrive (até 32 entradas)</h2><pre id='usb-files'>Carregando…</pre>
+<h2>Fila de log do SD</h2><pre id='usb-logs'>Carregando…</pre><a href='/logs'>Abrir log do SD</a>
+</section><script>(()=>{'use strict';
+const el=id=>document.getElementById('usb-'+id);let busy=false;
+const states=['Não iniciado','Host ativo','Falha de tarefa/memória','Pacote sem suporte host/HID/MSC','Conflito com USB Device no boot','Falha ao iniciar o host'];
+async function refresh(){if(busy||document.hidden)return;busy=true;el('refresh').disabled=true;
+try{const requests=await Promise.all(['/api/usb/status','/api/usb/files','/api/log/status'].map(url=>fetch(url,{cache:'no-store',signal:AbortSignal.timeout(8000)})));if(requests.some(r=>!r.ok))throw Error('Falha ao consultar USB/log');
+const [s,files,l]=await Promise.all([requests[0].json(),requests[1].text(),requests[2].json()]);
+el('status').textContent=(states[s.state]||'Estado desconhecido')+'\nTeclado: '+(s.keyboard?'conectado':'ausente')+' · relatórios: '+s.keyboard_reports+'\nMouse: '+(s.mouse?'conectado':'ausente')+' · relatórios: '+s.mouse_reports+'\nPendrive: '+(s.drive_connected?'conectado':'ausente')+' · FAT: '+(s.fat_mounted?'montado':'não montado')+'\nCapacidade: '+s.drive_bytes+' bytes · erros USB: '+s.errors;
+el('files').textContent=files;el('logs').textContent='Fila: '+l.queued+' · gravados: '+l.written+' · descartados: '+l.dropped+'\nRotação: 1 MB por arquivo, quatro históricos.';el('message').textContent='Estado atualizado.';
+}catch(e){el('message').textContent='Não foi possível atualizar. Os dados anteriores podem estar desatualizados.';}finally{busy=false;el('refresh').disabled=false;}}
+el('refresh').onclick=refresh;el('rescan').onclick=async()=>{el('rescan').disabled=true;try{const r=await fetch('/api/command',{method:'POST',headers:{'X-ESP32-Command':'1'},body:new URLSearchParams({cmd:'usb_rescan'}),signal:AbortSignal.timeout(8000)});if(!r.ok)throw Error();el('message').textContent=await r.text();}catch(e){el('message').textContent='Não foi possível confirmar a releitura; consulte usb_status.';}finally{el('rescan').disabled=false;}};
+refresh();setInterval(refresh,5000);})();</script>
+)USBVIEW";
+
+static String portalStart(const char* title, bool wifi, bool logs = false, bool prometheus = false, bool mqtt = false, bool edge = false, bool camera = false, bool usb = false)
 {
     String h;
     h.reserve(11000);
@@ -111,7 +225,7 @@ static String portalStart(const char* title, bool wifi, bool logs = false, bool 
     h += F("</head><body><div class='layout'><aside><a class='brand' href='/info'><span "
            "class='mark'>P4</span><span>Network Hub<small>ESP32 MONITOR</small></span></a><nav "
            "class='nav' aria-label='Navegação'>");
-    h += String("<a href='/info' ") + (!wifi && !logs && !prometheus ? "class='active' aria-current='page'" : "") +
+    h += String("<a href='/info' ") + (!wifi && !logs && !prometheus && !mqtt && !edge && !camera && !usb ? "class='active' aria-current='page'" : "") +
          ">Informações</a>";
     h += String("<a href='/wifi' ") + (wifi ? "class='active' aria-current='page'" : "") +
          ">Redes Wi-Fi</a>";
@@ -120,6 +234,10 @@ static String portalStart(const char* title, bool wifi, bool logs = false, bool 
          ">Log do dispositivo</a>";
     h += F("<a href='/firmware'>Firmware</a>");
     h += String("<a href='/prometheus' ") + (prometheus ? "class='active' aria-current='page'" : "") + ">Prometheus</a>";
+    h += String("<a href='/mqtt' ") + (mqtt ? "class='active' aria-current='page'" : "") + ">MQTT / Home Assistant</a>";
+    h += String("<a href='/edge' ") + (edge ? "class='active' aria-current='page'" : "") + ">Processamento local</a>";
+    h += String("<a href='/camera' ") + (camera ? "class='active' aria-current='page'" : "") + ">Câmera</a>";
+    h += String("<a href='/usb' ") + (usb ? "class='active' aria-current='page'" : "") + ">USB / Registros</a>";
     h += F("</nav><p class='aside-note'>Seu dispositivo, suas conexões.<br><br>Portal local · "
            "ESP32-P4</p></aside><main>");
     return h;

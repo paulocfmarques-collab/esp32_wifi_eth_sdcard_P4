@@ -15,6 +15,7 @@ class OledDisplay
     bool _inicializado;
     uint8_t _pagina = 0;
     bool _autoPaginas = true;
+    bool _imagemCamera = false;
     uint32_t _ultimaPagina = 0, _ultimoPainel = 0, _consoleAte = 0;
     uint32_t _ultimaAtividade = 0, _ultimoRobo = 0, _frameRobo = 0;
     uint32_t _tempoProtetor = 60000;
@@ -59,6 +60,7 @@ class OledDisplay
     {
         return _inicializado;
     }
+    bool mostrarImagemCamera(const uint8_t* pixels, size_t size);
 };
 
 #endif

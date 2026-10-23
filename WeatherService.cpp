@@ -1,5 +1,6 @@
 #include "WeatherService.h"
 #include "DeviceConfig.h"
+#include "SystemLog.h"
 #include <WiFi.h>
 #include <ETH.h>
 #include <NetworkClientSecure.h>
@@ -128,6 +129,7 @@ bool WeatherService::fetch() {
     portEXIT_CRITICAL(&_mux);
     if (next.lastRequestOk) Serial.printf("[CLIMA] Open-Meteo Porto Alegre: %.1f C\n", next.temperature);
     else Serial.printf("[CLIMA] HTTP %d: %s; nova tentativa em 2 min.\n", next.httpStatus, errorName(next.error));
+    systemLog.record("CLIMA", "HTTP=%d sucesso=%d temperatura=%.1f erro=%d", next.httpStatus, next.lastRequestOk, next.temperature, next.error);
     return next.lastRequestOk;
 }
 
