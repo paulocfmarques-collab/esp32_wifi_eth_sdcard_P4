@@ -1,4 +1,9 @@
-# Prometheus — firmware 1.20.0
+# Prometheus — firmware 1.20.1
+
+## Olhos digitais — 1.20.1 (25/10/2026)
+
+O protetor de tela usa duas íris circulares com pupila escura, anéis e traços radiais animados, inspirados na imagem de referência. Mantém o piscar e as expressões, em preto e branco no OLED 128 × 64. Após compilar e gravar, use protetor:on para visualizar. Esta alteração não muda pinos, comandos ou métricas.
+
 
 ## USB Host e registros ampliados — 1.20.0
 

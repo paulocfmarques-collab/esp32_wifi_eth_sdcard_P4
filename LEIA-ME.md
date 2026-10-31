@@ -1,5 +1,10 @@
 # ESP32-P4 — Monitor de rede com OLED
 
+## Olhos digitais — 1.20.1 (25/10/2026)
+
+O protetor de tela usa duas íris circulares com pupila escura, anéis e traços radiais animados, inspirados na imagem de referência. Mantém o piscar e as expressões, em preto e branco no OLED 128 × 64. Após compilar e gravar, use protetor:on para visualizar. Esta alteração não muda pinos, comandos ou métricas.
+
+
 ## USB Host e registros ampliados — 1.20.0
 
 Abra **USB / Registros** no menu web (`/usb`) para ver host, teclado, mouse, pendrive, listagem da raiz e fila de gravação no SD. As USB-A usam o controlador **high-speed dedicado / TinyUSB root port 1**, preservando GPIO27 do botão e a interface de programação. Não se inicia a pilha ESP-IDF USB Host em paralelo com TinyUSB.
@@ -124,10 +129,10 @@ A primeira consulta aguarda internet por Wi-Fi ou Ethernet e relógio sincroniza
 
 Use `weather_status` pela Serial, UDP ou terminal web para ver rede, NTP, validade, temperatura, umidade, idade e último resultado HTTP. Instale **ArduinoJson 7.x** (revisado com os cabeçalhos 7.4.3); HTTPClient e NetworkClientSecure acompanham o pacote Arduino ESP32.
 
-Versão 1.20.0 do projeto Wi-Fi, Ethernet e cartão SD. Inclui Prometheus, página de log, seis telas OLED,
+Versão 1.20.1 do projeto Wi-Fi, Ethernet e cartão SD. Inclui Prometheus, página de log, seis telas OLED,
 crash_info, monitoramento de rede, dois cores, serial, terminal web e OTA.
 
-Documentação revisada em **22/10/2026**, conforme o firmware **1.20.0**.
+Documentação revisada em **25/10/2026**, conforme o firmware **1.20.1**.
 Referências: [comandos](COMANDOS.md), [Prometheus/Grafana](PROMETHEUS.md)
 e [histórico de alterações](CHANGELOG.md).
 

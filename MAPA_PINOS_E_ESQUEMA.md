@@ -1,6 +1,11 @@
 # Mapa de pinos e esquema de ligações — ESP32-P4
 
-Revisão: **22/10/2026**. Referência do código: **v1.20.0**, placa **Waveshare ESP32-P4-Module-DEV-KIT**, pacote Arduino ESP32 **3.3.12**, variante `esp32p4`.
+## Olhos digitais — 1.20.1 (25/10/2026)
+
+O protetor de tela usa duas íris circulares com pupila escura, anéis e traços radiais animados, inspirados na imagem de referência. Mantém o piscar e as expressões, em preto e branco no OLED 128 × 64. Após compilar e gravar, use protetor:on para visualizar. Esta alteração não muda pinos, comandos ou métricas.
+
+
+Revisão: **25/10/2026**. Referência do código: **v1.20.1**, placa **Waveshare ESP32-P4-Module-DEV-KIT**, pacote Arduino ESP32 **3.3.12**, variante `esp32p4`.
 
 Este documento combina a configuração do firmware, os padrões do SDK e o esquema elétrico da placa. As ligações internas já existem na placa; não precisam de jumpers externos. OLED e botão são as ligações externas descritas pelo projeto; câmera e alto-falante usam seus conectores próprios.
 

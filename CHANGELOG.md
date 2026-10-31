@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.20.1 — 2026-10-25
+
+- Olhos do robô redesenhados com íris circulares, pupilas escuras, anéis e traços radiais animados, inspirados na referência de olho digital.
+- Mantidos o piscar, as expressões e a navegação do protetor. Desenho adaptado ao OLED monocromático de 128 × 64 pixels.
+- Firmware não compilado nem gravado; validação visual no dispositivo pendente.
+
 ## 1.20.0 — 2026-10-22
 
 - Habilita USB Host HS com teclado/mouse HID e um pendrive MSC FAT, tarefa dedicada, montagem sem formatação e listagem limitada em cache.

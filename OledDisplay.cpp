@@ -207,17 +207,45 @@ void OledDisplay::desenharRobo(uint32_t now)
     _display.clearDisplay();
     // Entire 128x64 canvas: no clock, terminal or fixed header over the robot.
     _display.drawRoundRect(1 + (dx + 3) / 3, 1 + (dy + 1), 123, 60, 9, SSD1306_WHITE);
-    for (int x : {19 + dx, 76 + dx}) {
-        if (piscar) _display.fillRoundRect(x, 28 + dy, 32, 3, 1, SSD1306_WHITE);
-        else if (expressao == 1) {
-            _display.fillRoundRect(x, 18 + dy, 32, 22, 8, SSD1306_WHITE);
-            _display.fillRoundRect(x - 1, 25 + dy, 34, 18, 7, SSD1306_BLACK);
+    // Unit circle scaled by 100: deterministic iris animation without floating point.
+    static const int8_t circle[32][2] = {
+        {100,0},{98,20},{92,38},{83,56},{71,71},{56,83},{38,92},{20,98},
+        {0,100},{-20,98},{-38,92},{-56,83},{-71,71},{-83,56},{-92,38},{-98,20},
+        {-100,0},{-98,-20},{-92,-38},{-83,-56},{-71,-71},{-56,-83},{-38,-92},{-20,-98},
+        {0,-100},{20,-98},{38,-92},{56,-83},{71,-71},{83,-56},{92,-38},{98,-20}
+    };
+    for (int cx : {35 + dx, 92 + dx}) {
+        const int cy = 27 + dy;
+        if (piscar) {
+            _display.fillRoundRect(cx - 16, cy, 33, 3, 1, SSD1306_WHITE);
+            continue;
+        }
+        const int radius = expressao == 3 ? 18 : 17;
+        _display.drawCircle(cx, cy, radius, SSD1306_WHITE);
+        _display.drawCircle(cx, cy, 14, SSD1306_WHITE);
+        _display.drawCircle(cx, cy, 8, SSD1306_WHITE);
+        for (int i = 0; i < 32; ++i) {
+            const int phase = (i + frame / 3) % 32;
+            const int inner = 9 + (phase % 3);
+            const int outer = phase % 4 == 0 ? radius : 13 + phase % 3;
+            _display.drawLine(cx + circle[i][0] * inner / 100,
+                              cy + circle[i][1] * inner / 100,
+                              cx + circle[i][0] * outer / 100,
+                              cy + circle[i][1] * outer / 100, SSD1306_WHITE);
+            if (phase % 4 == 0)
+                _display.drawPixel(cx + circle[i][0] * (radius + 2) / 100,
+                                   cy + circle[i][1] * (radius + 2) / 100, SSD1306_WHITE);
+        }
+        // Dark pupil and small technical marks around the iris, like the reference.
+        _display.fillCircle(cx, cy, 6, SSD1306_BLACK);
+        _display.drawFastHLine(cx - 23, cy, 5, SSD1306_WHITE);
+        _display.drawFastHLine(cx + 19, cy, 5, SSD1306_WHITE);
+        if (expressao == 1) {
+            _display.fillRect(cx - 20, cy - 20, 41, 9, SSD1306_BLACK);
+            _display.drawFastHLine(cx - 12, cy - 11, 25, SSD1306_WHITE);
         } else if (expressao == 2) {
-            _display.fillRoundRect(x, 29 + dy, 32, 8, 3, SSD1306_WHITE);
-        } else {
-            int h = expressao == 3 ? 30 : 24;
-            _display.fillRoundRect(x, 14 + dy, 32, h, 8, SSD1306_WHITE);
-            _display.fillRoundRect(x + 11 + dx, 20 + dy, 10, h - 10, 3, SSD1306_BLACK);
+            _display.fillRect(cx - 20, cy - 20, 41, 17, SSD1306_BLACK);
+            _display.drawFastHLine(cx - 16, cy - 3, 33, SSD1306_WHITE);
         }
     }
     if (expressao == 3) _display.drawRoundRect(58 + dx, 46 + dy, 12, 11, 5, SSD1306_WHITE);
