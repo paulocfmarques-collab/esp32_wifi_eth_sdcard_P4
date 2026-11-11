@@ -32,6 +32,7 @@ private:
     std::atomic<uint32_t> _disconnects{0};
     std::atomic<int> _errorType{0}, _brokerCode{0}, _socketError{0}, _transportError{0};
     uint32_t _publishAt = 0, _applyAt = 0;
+    uint32_t _servoPublishAt = 0;
     uint32_t _discoveryAt = 0, _announceAt = 0;
     bool _pending = false;
     size_t _discoveryIndex = 0;
@@ -42,6 +43,7 @@ private:
     bool publish(const String& topic, const String& payload, bool retain = true);
     bool discovery(size_t index);
     void state(StorageManager& storage);
+    void servoState();
     String configuration();
     void save(WebServer& server);
 };

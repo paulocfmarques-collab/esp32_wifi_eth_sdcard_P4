@@ -10,6 +10,9 @@
 #include "CameraService.h"
 #include "UsbHostService.h"
 #include "SystemLog.h"
+#include "RadarServo.h"
+#include "RadarRecording.h"
+#include "UltrasonicService.h"
 
 #include "FirmwareVersion.h"
 
@@ -241,20 +244,20 @@ void SlaveCommandHandler::executarInterno(String cmd)
         if (arg == "auto")
         {
             _oled.paginasAutomaticas();
-            _net.responderUDP("Telas automaticas (8 s)\n");
+            _net.responderUDP("Troca automatica desativada. Use o botao para avancar.\n");
         }
         else if (arg == "next")
         {
             _oled.avancarPagina();
             _net.responderUDP("Proxima tela\n");
         }
-        else if (arg.length() == 1 && arg[0] >= '0' && arg[0] <= '5')
+        else if (arg.length() == 1 && arg[0] >= '0' && arg[0] <= '7')
         {
             _oled.selecionarPagina(arg.toInt());
             _net.responderUDP("Tela selecionada\n");
         }
         else
-            _net.responderUDP("Use tela:0..5, tela:next ou tela:auto\n");
+            _net.responderUDP("Use tela:0..7, tela:next ou tela:auto\n");
     }
     else if (nome == "protetor")
     {
@@ -278,17 +281,21 @@ void SlaveCommandHandler::executarInterno(String cmd)
         }
         _net.responderUDP(_oled.statusProtetor());
     }
+    else if (nome == "servo") { _net.responderUDP(radarServo.command(arg)); }
+    else if (nome == "radar_log") { _net.responderUDP(radarRecording.command(arg, _storage.isAtivo())); }
+    else if (nome == "ultrasonic") { _net.responderUDP(ultrasonic.command(arg)); }
     else if (nome == "usb_status") { _net.responderUDP(usbHost.status() + "\n"); }
     else if (nome == "usb_list") { _net.responderUDP(usbHost.files()); }
     else if (nome == "usb_rescan") { usbHost.rescan(); _net.responderUDP("Releitura da raiz solicitada; consulte usb_list em instantes\n"); }
     else if (nome == "log_status") { _net.responderUDP(systemLog.status() + "\n"); }
     else if (nome == "camera_oled")
     {
-        uint8_t pixels[1024];
         if (!arg.isEmpty()) _net.responderUDP("Use camera_oled sem argumentos\n");
-        else if (!camera.copyOled(pixels, sizeof(pixels))) _net.responderUDP("Camera sem imagem recente; consulte camera_status\n");
-        else if (!_oled.mostrarImagemCamera(pixels, sizeof(pixels))) _net.responderUDP("OLED indisponivel ou ocupado\n");
-        else _net.responderUDP("Quadro da camera no OLED por 10 s. Botao ou tela:next para sair.\n");
+        else if (!_oled.isPronto()) _net.responderUDP("OLED indisponivel\n");
+        else {
+            _oled.selecionarPagina(6);
+            _net.responderUDP("Camera no OLED: foto a cada segundo. Botao ou tela:next para sair.\n");
+        }
     }
     else if (nome == "camera_status")
     {
@@ -481,7 +488,7 @@ void SlaveCommandHandler::executarInterno(String cmd)
             "wifi_list\n"
             "wifi_add:SSID|SENHA\n"
             "reset_wifi\n"
-            "tela:0..5\n"
+            "tela:0..7\n"
             "tela:[next]\n"
             "tela:[auto]\n"
             "botao_status\n"
@@ -493,6 +500,10 @@ void SlaveCommandHandler::executarInterno(String cmd)
             "edge_status\n"
             "camera_status\n"
             "camera_oled\n"
+            "servo:on|off|status|angulo:5..175\n"
+            "servo:rastrear:on|off\n"
+            "radar_log:on|off|status\n"
+            "ultrasonic:on|off|status\n"
             "usb_status\nusb_list\nusb_rescan\nlog_status\n"
             "time\n"
             "date\n"

@@ -3,6 +3,7 @@
 #include "MqttService.h"
 #include "EdgeComputing.h"
 #include "CameraService.h"
+#include "RadarRecording.h"
 #include "SystemLog.h"
 #include "UsbHostService.h"
 #include "CpuTemperature.h"
@@ -136,6 +137,10 @@ void NetworkController::configurarRotas() {
   _server.on("/api/dashboard", HTTP_GET, [this]() { handleInfo(); });
   _server.on("/api/command", HTTP_POST, [this]() { handleCommand(); });
   _server.on("/logs", HTTP_GET, [this]() { handleLogs(); });
+  _server.on("/radar.csv", HTTP_GET, [this]() {
+    if (atualizacaoEmCurso()) { _server.send(503, "text/plain", "Atualizacao em andamento"); return; }
+    radarRecording.download(_server, _storage.isAtivo());
+  });
   _server.on("/api/logs", HTTP_GET, [this]() { handleLogData(); });
   _server.on("/prometheus", HTTP_GET, [this]() {
     _server.sendHeader("Cache-Control", "no-store");

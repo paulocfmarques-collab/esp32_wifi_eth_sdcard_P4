@@ -1,5 +1,87 @@
 # Changelog
 
+## 1.25.0 — 2026-11-06
+
+- Adiciona oitava tela OLED, sonar semicircular de alcance 4 m, com anéis de 1 m, feixe no ângulo comandado ao servo e ecos reais do HC-SR04.
+- Histórico limitado a 35 setores de 5°, pontos recentes maiores, persistência de 6 s e marcador do alvo acompanhado. Sem inventar ecos quando a leitura é inválida.
+- Sonar permanece selecionado até navegação explícita, sem protetor automático nem sobreposição do terminal; botão avança para relógio. Câmera continua com o mesmo comportamento permanente.
+- `tela:7` abre diretamente; atalhos no portal e descoberta MQTT do Home Assistant. Comandos de tela passam a aceitar 0..7. Não liga o motor automaticamente.
+- Atualização do desenho limitada a 150 ms; captura de ecos usa dados existentes. Documentação atualizada, sem compilação/gravação ou teste físico.
+
+## 1.24.0 — 2026-11-06
+
+- Busca com HC-SR04 passa a avançar 5° por tentativa de medição concluída, após estabilização; deixa de esperar o stream nesse modo. Faixa mecânica permanece 5°–175°.
+- Confirma alvo entre 10–200 cm com dois ecos independentes próximos, aponta a câmera para a direção e acompanha aproximadamente por sondagens centro/±6°. Amplia para ±12° ao perder ecos e volta à busca após três ciclos inválidos ou perda prolongada.
+- Associa sequência e comando de posição a cada tentativa, evitando dupla confirmação ou uso de distância antiga em outro ângulo. Mantém timeout/ausência de eco sem distância inventada.
+- Adiciona `servo:rastrear:on|off`, botões no portal/MQTT, indicador Alvo no radar e métricas/atributos de alvo e rastreamento. Posição manual assume controle; off/OTA descartam o alvo.
+- Acompanhamento por ultrassom em um eixo, sem identificação visual ou foco óptico. Parâmetros e limitações em RADAR_TRACKING.md. Firmware não compilado nem testado na placa.
+
+## 1.23.0 — 2026-11-06
+
+- Adiciona HC-SR04 no GPIO3/TRIG (P6 19) e GPIO4/ECHO (P6 18), exigindo divisor resistivo no ECHO de 5 V.
+- Captura bordas por interrupção, pulso TRIG de 12 µs, intervalo mínimo 100 ms e timeout 30 ms. Sem pulseIn nem espera bloqueante pelo eco.
+- Aguarda 100 ms desde o último comando PWM antes da medição e segura avanços automáticos do servo durante o eco. Distância e ângulo da mesma aquisição; ângulo é comandado, sem sensor físico de posição. Sem eco/fora de 2–400 cm/dado com mais de 1 s: indisponível, nunca zero inventado.
+- Comandos ultrasonic:on|off|status; habilitado ao iniciar, independente do servo. Pausa durante OTA. Resumos SD a cada minuto, sem log de cada eco.
+- Home Assistant MQTT adiciona distância, ângulo da leitura e botões de ligar/desligar/consultar ultrassom. Prometheus adiciona disponibilidade, distância, ângulo e contadores de leituras/erros/idade.
+- Não implementa perseguição automática de alvo. Firmware não compilado nem gravado; sensor e comportamento físico precisam de validação.
+
+## 1.22.0 — 2026-11-06
+
+- Amplia a varredura e o posicionamento do servo para 5°–175° nominais, mantendo sincronismo com o streaming (2° por novo quadro, mínimo 200 ms; cerca de 17 s por percurso a 5 fps).
+- Descoberta MQTT do Home Assistant adiciona quatro botões: iniciar radar, parar servo, centralizar em 90° e atualizar estado; adiciona controle numérico de ângulo 5–175° e sensor de estado.
+- Publica modo/ângulo comandado/alvo/limites em `/servo/state` a cada segundo, separado da telemetria geral de 30 s. Não há sensor de posição física.
+- Aceita comandos MQTT de servo explicitamente permitidos e ângulos inteiros validados; ignora mensagens de comando retidas. Mantém IDs das entidades anteriores e execução de hardware no ciclo da aplicação.
+- Firmware não compilado nem gravado; descoberta e comandos ainda precisam de validação no Home Assistant real.
+
+## 1.21.2 — 2026-11-06
+
+- Alvo de captura JPEG passa de 2 para 5 fps. Remove a pausa adicional de 500 ms após cada envio MJPEG; cada cliente aguarda um novo quadro.
+- Associa o número do quadro ao JPEG sob o mesmo mutex e registra o último quadro transmitido com sucesso, sem retroceder por causa de um segundo cliente lento.
+- Radar avança no máximo 2° por quadro novo enviado, com intervalo mínimo de 200 ms (cerca de 14 s por percurso a 5 fps). Sem clientes, acompanha captura; sem câmera disponível, usa temporizador de 200 ms. Posicionamento fixo mantém 1°/20 ms.
+- `camera_status` informa target_fps/last_stream_frame e `servo:status` informa modo de sincronismo. OLED continua em uma foto por segundo.
+- Alvo de fps depende da resolução, processamento e rede; envio concluído não comprova exibição no navegador. Não houve compilação nem teste físico.
+
+## 1.21.1 — 2026-11-06
+
+- Amplia a varredura e o posicionamento manual do servo para 20°–160° nominais. Mantém passo de 1° a cada 20 ms, aproximadamente 2,8 s por percurso.
+- Atualiza ajuda dos comandos e documentação. Firmware não compilado nem gravado.
+
+## 1.21.0 — 2026-11-06
+
+- Adiciona servo posicional tipo radar no GPIO2 (P6 pino 21), PWM LEDC 50 Hz/14 bits, sem biblioteca adicional.
+- Inicia desligado. `servo:on` varre entre 30° e 150° nominais, 1° a cada 20 ms; `servo:off` remove pulsos; `servo:angulo:30..150` posiciona gradualmente; `servo:status` informa estado e ângulo comandado, sem realimentação.
+- Movimento não bloqueante no ciclo principal, suspenso durante OTA. Logs de início, comandos e falhas no SD; sem log por passo.
+- Documenta fonte externa adequada ao servo e GND comum; adiciona atalhos no terminal web.
+- Firmware não compilado nem gravado; PWM e movimento ainda precisam de validação no hardware.
+
+## 1.20.6 — 2026-11-06
+
+- Reativa o protetor automático após 60 segundos de inatividade nas seis telas de informações. A câmera (tela:6) permanece excluída.
+- Mantém a navegação pelo botão, sem rotação automática das páginas, e a foto da câmera atualizada a cada segundo.
+
+## 1.20.5 — 2026-11-06
+
+- Remove a rotação temporizada das sete telas: GPIO27 avança uma tela por pressionamento e mantém a seleção.
+- Protetor automático desativado por padrão para não substituir a tela por inatividade. A ativação explícita por comando continua disponível.
+- `tela:auto` permanece compatível, mas apenas retoma a tela selecionada, sem habilitar temporizador. Comandos manuais de tela continuam disponíveis.
+- Câmera continua atualizando a foto a cada segundo enquanto selecionada.
+
+## 1.20.4 — 2026-11-06
+
+- Aplica rotação de 180° antes da codificação JPEG, incluindo fotos, streaming MJPEG e Home Assistant. O OLED usa o mesmo quadro, sem aplicar uma segunda rotação.
+- Buffer de entrada próprio alocado uma vez pelo alocador JPEG; preserva o buffer DMA da captura. A atualização do OLED continua em uma foto por segundo.
+
+## 1.20.3 — 2026-11-06
+
+- Gira em 180° a imagem da câmera exibida no OLED, preservando a atualização de uma foto por segundo. JPEG e streaming mantêm sua orientação.
+
+## 1.20.2 — 2026-11-06
+
+- Adiciona a sétima tela OLED, câmera em tela inteira, com atualização do último quadro disponível a cada segundo.
+- Ao chegar à câmera, mantém a tela até o botão GPIO27 ou um comando de navegação; não entra automaticamente no protetor nem troca por mensagens do terminal. OTA continua com prioridade.
+- `camera_oled` e `tela:6` selecionam essa tela. Se faltar imagem recente, mostra diagnóstico e tenta novamente a cada segundo.
+- Captura continua na tarefa da câmera; OLED apenas copia o quadro monocromático já preparado.
+
 ## 1.20.1 — 2026-10-25
 
 - Olhos do robô redesenhados com íris circulares, pupilas escuras, anéis e traços radiais animados, inspirados na referência de olho digital.

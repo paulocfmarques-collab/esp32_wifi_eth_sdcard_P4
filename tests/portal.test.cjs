@@ -50,12 +50,12 @@ test('oversized UTF-8 input and embedded newline never reach the server', async 
   const b = browser(); await b.send('é'.repeat(128)); await b.send('alive\nreboot');
   assert.equal(b.requests.length, 0);
 });
-test('web automatic pages shortcut resumes the OLED rotation', async () => {
+test('web resume-page shortcut preserves the legacy command', async () => {
   const b = browser();
   b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command: 'tela:auto' } }) } });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(b.requests.find(r => r.url === '/api/command').options.body.get('cmd'), 'tela:auto');
-  assert.match(source, /data-command='tela:auto'>Telas automáticas/);
+  assert.match(source, /data-command='tela:auto'>Retomar tela/);
 });
 test('destructive commands require confirmation', async () => {
   const b = browser({ approve: false }); await b.send('sd_del:/a.txt'); await b.send('restart'); await b.send('reset_counters');
@@ -68,6 +68,50 @@ test('robot screensaver shortcut sends the command through the shared endpoint',
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(b.requests.find(r => r.url === '/api/command').options.body.get('cmd'), 'protetor:on');
   assert.match(source, /data-command='protetor:on'>Carinhas de robô/);
+});
+
+test('radar shortcuts send start, stop and status through the command endpoint', async () => {
+  for (const command of ['servo:on', 'servo:off', 'servo:status']) {
+    const b = browser();
+    b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command } }) } });
+    await new Promise(resolve => setImmediate(resolve));
+    const request = b.requests.find(r => r.url === '/api/command');
+    assert.equal(request.options.body.get('cmd'), command);
+    assert.equal(request.options.headers['X-ESP32-Command'], '1');
+    assert.ok(source.includes("data-command='" + command + "'"));
+  }
+});
+
+test('tracking shortcuts enable and disable following through the command endpoint', async () => {
+  for (const command of ['servo:rastrear:on', 'servo:rastrear:off']) {
+    const b = browser();
+    b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command } }) } });
+    await new Promise(resolve => setImmediate(resolve));
+    const request = b.requests.find(r => r.url === '/api/command');
+    assert.equal(request.options.body.get('cmd'), command);
+    assert.equal(request.options.headers['X-ESP32-Command'], '1');
+    assert.ok(source.includes("data-command='" + command + "'"));
+  }
+});
+
+test('sonar screen shortcut selects the sticky eighth OLED page', async () => {
+  const b = browser();
+  b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command: 'tela:7' } }) } });
+  await new Promise(resolve => setImmediate(resolve));
+  const request = b.requests.find(r => r.url === '/api/command');
+  assert.equal(request.options.body.get('cmd'), 'tela:7');
+  assert.equal(request.options.headers['X-ESP32-Command'], '1');
+  assert.match(source, /data-command='tela:7'>Sonar no OLED/);
+});
+
+test('ultrasonic shortcut queries status through the protected command endpoint', async () => {
+  const b = browser();
+  b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command: 'ultrasonic:status' } }) } });
+  await new Promise(resolve => setImmediate(resolve));
+  const request = b.requests.find(r => r.url === '/api/command');
+  assert.equal(request.options.body.get('cmd'), 'ultrasonic:status');
+  assert.equal(request.options.headers['X-ESP32-Command'], '1');
+  assert.ok(source.includes("data-command='ultrasonic:status'"));
 });
 
 test('web next-page command is available to exit the robot and resume navigation', async () => {

@@ -10,6 +10,9 @@
 #include "CameraService.h"
 #include "SystemLog.h"
 #include "UsbHostService.h"
+#include "RadarServo.h"
+#include "RadarRecording.h"
+#include "UltrasonicService.h"
 #include "FirmwareVersion.h"
 #include <esp_system.h>
 
@@ -91,6 +94,8 @@ void setup()
     camera.startStreaming(network.metricsPort());
     usbHost.begin();
     weather.begin();
+    radarServo.begin();
+    ultrasonic.begin();
     if (xTaskCreatePinnedToCore(applicationLoop, "device_app", 12288, nullptr, 1, &applicationTask,
                                 1) != pdPASS)
     {
@@ -113,6 +118,9 @@ void executarCiclo()
     pageAudio.suspend(network.atualizacaoEmCurso());
     camera.suspend(network.atualizacaoEmCurso());
     weather.suspend(network.atualizacaoEmCurso());
+    ultrasonic.handle(network.atualizacaoEmCurso());
+    radarServo.handle(network.atualizacaoEmCurso());
+    radarRecording.handle(network.atualizacaoEmCurso());
     if (network.atualizacaoEmCurso())
         return;
     cmdHandler.processarSerial();

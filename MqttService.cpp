@@ -6,6 +6,8 @@
 #include "CpuTemperature.h"
 #include "EdgeComputing.h"
 #include "SystemLog.h"
+#include "RadarServo.h"
+#include "UltrasonicService.h"
 #include <WiFi.h>
 #include <ETH.h>
 #include <Preferences.h>
@@ -34,10 +36,23 @@ const Entity sensors[] = {
     {"sd_free", "SD livre", "B", "data_size"},
     {"sd_used", "SD usado", "B", "data_size"}
 };
-const char* actions[] = {"tela:next", "tela:auto", "protetor:on", "protetor:off", "audio_test", "camera_oled"};
-const char* actionNames[] = {"Proxima tela", "Telas automaticas", "Carinhas ligar", "Carinhas desligar", "Testar som", "Camera no OLED"};
+const char* actions[] = {"tela:next", "tela:auto", "protetor:on", "protetor:off", "audio_test", "camera_oled",
+    "servo:on", "servo:off", "servo:angulo:90", "servo:status",
+    "ultrasonic:on", "ultrasonic:off", "ultrasonic:status", "servo:rastrear:on", "servo:rastrear:off", "tela:7"};
+const char* actionNames[] = {"Proxima tela", "Retomar tela", "Carinhas ligar", "Carinhas desligar", "Testar som", "Camera no OLED",
+    "Iniciar radar", "Parar servo", "Centralizar servo", "Atualizar estado do servo",
+    "Ligar ultrassom", "Desligar ultrassom", "Atualizar ultrassom", "Habilitar acompanhamento", "Desabilitar acompanhamento", "Sonar no OLED"};
 constexpr size_t SENSOR_COUNT = sizeof(sensors) / sizeof(sensors[0]);
 constexpr size_t ACTION_COUNT = sizeof(actions) / sizeof(actions[0]);
+static_assert(ACTION_COUNT == sizeof(actionNames) / sizeof(actionNames[0]), "MQTT action names must match commands");
+bool servoAngleCommand(const String& payload) {
+    if (!payload.startsWith("servo:angulo:")) return false;
+    const String number = payload.substring(13);
+    if (number.isEmpty() || number.length() > 3) return false;
+    for (char c : number) if (c < '0' || c > '9') return false;
+    const int angle = number.toInt();
+    return angle >= SERVO_MIN_ANGLE && angle <= SERVO_MAX_ANGLE;
+}
 }
 
 void MqttService::begin() {
@@ -125,7 +140,7 @@ void MqttService::event(void* arg, esp_event_base_t, int32_t id, void* data) {
             return;
         }
         if (topic != self._base + "/command" || e->retain) return;
-        bool allowed = payload == "led_on" || payload == "led_off";
+        bool allowed = payload == "led_on" || payload == "led_off" || servoAngleCommand(payload);
         for (auto action : actions) allowed = allowed || payload == action;
         if (!allowed) return;
         Command command = {};
@@ -172,11 +187,48 @@ bool MqttService::discovery(size_t index) {
         key = "navigation_button"; component = "event"; doc["name"] = "Botao GPIO27";
         doc["state_topic"] = _base + "/event";
         doc["event_types"].to<JsonArray>().add("press");
-    } else {
+    } else if (index == SENSOR_COUNT + ACTION_COUNT + 3) {
         key = "edge_alert"; component = "binary_sensor"; doc["name"] = "Alerta local";
         doc["device_class"] = "problem"; doc["state_topic"] = _base + "/state";
         doc["value_template"] = "{{ value_json.edge_alert }}";
         doc["payload_on"] = "ON"; doc["payload_off"] = "OFF";
+    } else if (index == SENSOR_COUNT + ACTION_COUNT + 4) {
+        key = "servo_angle"; component = "number"; doc["name"] = "Angulo do servo";
+        doc["command_topic"] = _base + "/command";
+        doc["command_template"] = "servo:angulo:{{ value | int }}";
+        doc["state_topic"] = _base + "/servo/state";
+        doc["value_template"] = "{{ value_json.angle }}";
+        doc["min"] = SERVO_MIN_ANGLE; doc["max"] = SERVO_MAX_ANGLE; doc["step"] = 1;
+        doc["mode"] = "slider"; doc["unit_of_measurement"] = "°";
+        doc["retain"] = false; doc["icon"] = "mdi:rotate-right";
+    } else if (index == SENSOR_COUNT + ACTION_COUNT + 5) {
+        key = "servo_status"; doc["name"] = "Estado do servo";
+        doc["state_topic"] = _base + "/servo/state";
+        doc["value_template"] = "{{ value_json.mode }}";
+        doc["json_attributes_topic"] = _base + "/servo/state";
+        doc["icon"] = "mdi:radar";
+    } else if (index == SENSOR_COUNT + ACTION_COUNT + 6 || index == SENSOR_COUNT + ACTION_COUNT + 7) {
+        const bool distance = index == SENSOR_COUNT + ACTION_COUNT + 6;
+        key = distance ? "ultrasonic_distance" : "ultrasonic_angle";
+        doc["name"] = distance ? "Distancia ultrassonica" : "Angulo da leitura ultrassonica";
+        doc["unit_of_measurement"] = distance ? "cm" : "°";
+        if (distance) doc["device_class"] = "distance";
+        doc["state_class"] = "measurement";
+        doc["state_topic"] = _base + "/servo/state";
+        const String field = distance ? "distance_cm" : "distance_angle";
+        doc["value_template"] = "{{ value_json." + field + " if value_json." + field + " is not none else 'None' }}";
+        doc["expire_after"] = 10;
+        doc["json_attributes_topic"] = _base + "/servo/state";
+    } else if (index == SENSOR_COUNT + ACTION_COUNT + 8) {
+        key = "radar_target"; component = "binary_sensor";
+        doc["name"] = "Alvo no radar"; doc["device_class"] = "occupancy";
+        doc["state_topic"] = _base + "/servo/state";
+        doc["value_template"] = "{{ 'ON' if value_json.target_locked else 'OFF' }}";
+        doc["payload_on"] = "ON"; doc["payload_off"] = "OFF";
+        doc["json_attributes_topic"] = _base + "/servo/state";
+        doc["expire_after"] = 10;
+    } else {
+        return false;
     }
     doc["unique_id"] = _id + "_" + key;
     doc["availability_topic"] = _base + "/availability";
@@ -222,22 +274,45 @@ void MqttService::handle(StorageManager& storage, bool busy, void (*command)(Str
             esp_mqtt_client_subscribe(_client, "homeassistant/status", 0) < 0) { ++_errors; _announce = true; }
         _announceAt = millis() + 5000;
         _discoveryIndex = 0; _discovering = true; _discoveryAt = millis();
-        _publishAt = millis();
+        _publishAt = millis(); _servoPublishAt = millis();
     }
     // Spread discovery across cycles and bound ESP-MQTT's outbox.
     if (_discovering && int32_t(millis() - _discoveryAt) >= 0) {
         bool ok = discovery(_discoveryIndex);
         _discoveryAt = millis() + (ok ? 50 : 1000);
-        if (ok && ++_discoveryIndex == SENSOR_COUNT + ACTION_COUNT + 4) {
+        if (ok && ++_discoveryIndex == SENSOR_COUNT + ACTION_COUNT + 9) {
             _discovering = false;
             if (!publish(_base + "/availability", "online")) _announce = true;
         }
     }
     Command next;
     if (_commands && xQueueReceive(_commands, &next, 0) == pdTRUE && command) {
-        command(String(next.text)); _publishAt = millis();
+        command(String(next.text)); _publishAt = millis(); _servoPublishAt = millis();
     }
     if (int32_t(millis() - _publishAt) >= 0) state(storage);
+    if (int32_t(millis() - _servoPublishAt) >= 0) servoState();
+}
+
+void MqttService::servoState() {
+    JsonDocument doc;
+    doc["mode"] = radarServo.mode();
+    doc["angle"] = radarServo.angle(); // Commanded PWM angle, not a physical position sensor.
+    doc["target"] = radarServo.target();
+    doc["min"] = SERVO_MIN_ANGLE; doc["max"] = SERVO_MAX_ANGLE;
+    doc["tracking_enabled"] = radarServo.trackingEnabled();
+    doc["target_locked"] = radarServo.targetLocked();
+    if (radarServo.targetLocked()) {
+        doc["target_angle"] = radarServo.trackedAngle();
+        doc["target_distance_cm"] = radarServo.trackedDistance();
+    } else { doc["target_angle"] = nullptr; doc["target_distance_cm"] = nullptr; }
+    doc["search_step_degrees"] = RADAR_SEARCH_STEP_DEGREES;
+    const auto sonar = ultrasonic.snapshot();
+    doc["ultrasonic_available"] = sonar.available;
+    if (sonar.available) doc["distance_cm"] = sonar.distanceCm; else doc["distance_cm"] = nullptr;
+    if (sonar.angleKnown) doc["distance_angle"] = sonar.angle; else doc["distance_angle"] = nullptr;
+    doc["ultrasonic_age_ms"] = sonar.ageMs;
+    doc["ultrasonic_samples"] = sonar.samples; doc["ultrasonic_errors"] = sonar.errors;
+    _servoPublishAt = millis() + (publish(_base + "/servo/state", jsonText(doc)) ? 1000 : 5000);
 }
 
 void MqttService::buttonPressed() { publish(_base + "/event", "{\"event_type\":\"press\"}", false); }

@@ -17,6 +17,7 @@ public:
     uint32_t streamClients() const { return _streamClients; }
     uint32_t streamFrames() const { return _streamFrames; }
     uint32_t streamErrors() const { return _streamErrors; }
+    uint32_t lastStreamFrame() const { return _lastStreamFrame.load(); }
     void suspend(bool paused) { _paused = paused; }
     String status();
     String page();
@@ -33,6 +34,7 @@ private:
     SemaphoreHandle_t _mutex = nullptr;
     TaskHandle_t _task = nullptr;
     uint8_t* _buffers[2] = {};
+    uint8_t* _rotated = nullptr;
     size_t _capacity = 0, _length = 0;
     uint8_t _monochrome[1024] = {};
     unsigned _front = 0, _width = 0, _height = 0;
@@ -43,11 +45,12 @@ private:
     httpd_handle_t _streamServer = nullptr;
     uint16_t _streamPort = 0;
     std::atomic<uint32_t> _streamClients{0}, _streamFrames{0}, _streamErrors{0};
+    std::atomic<uint32_t> _lastStreamFrame{0};
     std::atomic<uint32_t> _snapshotClients{0}, _rejectedClients{0};
     void fail(const char* message);
     static void run(void* context);
     void snapshot(WebServer& server);
-    uint8_t* copyFrame(size_t& length);
+    uint8_t* copyFrame(size_t& length, uint32_t* sequence = nullptr);
     static esp_err_t streamRequest(httpd_req_t* request);
     static void streamWorker(void* request);
     static void snapshotWorker(void* request);

@@ -3,6 +3,10 @@
 #include <Wire.h>
 #include "NetworkController.h"
 #include "StorageManager.h"
+#include "CameraService.h"
+#include "RadarServo.h"
+#include "UltrasonicService.h"
+#include <math.h>
 
 OledDisplay::OledDisplay()
     : _display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1), _inicializado(false), _totalLinhas(0),
@@ -14,10 +18,10 @@ OledDisplay::OledDisplay()
 bool OledDisplay::mostrarImagemCamera(const uint8_t* pixels, size_t size)
 {
     if (!_inicializado || _exibirProgresso || !pixels || size != SCREEN_WIDTH * SCREEN_HEIGHT / 8) return false;
-    registrarAtividade();
+    selecionarPagina(6);
     memcpy(_display.getBuffer(), pixels, size);
     _display.display();
-    _consoleAte = millis() + 10000;
+    _ultimoPainel = millis();
     _imagemCamera = true;
     _ultimaPagina = millis();
     return true;
@@ -92,7 +96,7 @@ void OledDisplay::atualizarRelogioSuperior(TimeManager& timeRef)
 
 void OledDisplay::redesenharTelaCompleta(const String& horaAtual)
 {
-    if (!_inicializado || _protetorAtivo)
+    if (!_inicializado || _protetorAtivo || (_pagina >= 6 && !_exibirProgresso))
         return;
     _display.clearDisplay();
     _display.setTextSize(1);
@@ -139,11 +143,11 @@ void OledDisplay::redesenharTelaCompleta(const String& horaAtual)
 
 void OledDisplay::selecionarPagina(uint8_t pagina)
 {
-    if (pagina >= 6) return;
+    if (pagina >= 8) return;
     bool mudou = pagina != _pagina || _protetorAtivo;
     registrarAtividade();
     _pagina = pagina;
-    _autoPaginas = false;
+    _imagemCamera = false;
     _consoleAte = 0;
     _ultimoPainel = millis() - 1000;
     _ultimaPagina = millis();
@@ -152,14 +156,13 @@ void OledDisplay::selecionarPagina(uint8_t pagina)
 
 void OledDisplay::avancarPagina()
 {
-    selecionarPagina((_pagina + 1) % 6);
-    paginasAutomaticas();
+    selecionarPagina((_pagina + 1) % 8);
 }
 
 void OledDisplay::paginasAutomaticas()
 {
+    // Legacy API/command: resume the selected page without timed navigation.
     registrarAtividade();
-    _autoPaginas = true;
     _ultimaPagina = millis();
     _consoleAte = 0;
     _ultimoPainel = millis() - 1000;
@@ -259,14 +262,98 @@ void OledDisplay::desenharRobo(uint32_t now)
     _display.display();
 }
 
+void OledDisplay::desenharSonar(uint32_t now)
+{
+    if (now - _ultimoPainel < 150) return;
+    _ultimoPainel = now;
+    _display.clearDisplay();
+    _display.setTextSize(1);
+    _display.setTextWrap(false);
+    _display.setTextColor(SSD1306_WHITE);
+    _display.setCursor(0, 0); _display.print("SONAR 4m");
+    _display.setCursor(56, 0);
+    _display.print(radarServo.targetLocked() ? "ALVO" : radarServo.enabled() ? "BUSCA" : "PARADO");
+    _display.setCursor(110, 0); _display.print("8/8");
+    const int cx = 64, cy = 54, radius = 43;
+    auto px = [&](int angle, int r) { return cx - int(lroundf(cosf(angle * 0.01745329252f) * r)); };
+    auto py = [&](int angle, int r) { return cy - int(lroundf(sinf(angle * 0.01745329252f) * r)); };
+    // Four rings: 1, 2, 3 and 4 metres. Draw only the upper semicircle.
+    for (int ring = 1; ring <= 4; ++ring) {
+        const int r = radius * ring / 4;
+        for (int a = 0; a < 180; a += 6)
+            _display.drawLine(px(a, r), py(a, r), px(a + 6, r), py(a + 6, r), SSD1306_WHITE);
+    }
+    _display.drawFastHLine(cx - radius, cy, radius * 2 + 1, SSD1306_WHITE);
+    for (int a : {30, 60, 90, 120, 150})
+        for (int r = 4; r <= radius; r += 4) _display.drawPixel(px(a, r), py(a, r), SSD1306_WHITE);
+    // Dots represent real distance/angle pairs, not a simulated sweep.
+    for (int i = 0; i < 35; ++i) {
+        const auto& echo = _ecosSonar[i];
+        const uint32_t age = now - echo.at;
+        if (!echo.cm || age >= 6000) continue;
+        const int r = min(radius, int(echo.cm * radius / 400));
+        const int x = px(5 + i * 5, r), y = py(5 + i * 5, r);
+        if (age < 1500) _display.fillCircle(x, y, 1, SSD1306_WHITE);
+        else _display.drawPixel(x, y, SSD1306_WHITE);
+    }
+    if (radarServo.enabled())
+        _display.drawLine(cx, cy, px(radarServo.angle(), radius), py(radarServo.angle(), radius), SSD1306_WHITE);
+    if (radarServo.targetLocked() && isfinite(radarServo.trackedDistance())) {
+        const int r = constrain(int(radarServo.trackedDistance() * radius / 400), 0, radius);
+        _display.drawCircle(px(radarServo.trackedAngle(), r), py(radarServo.trackedAngle(), r), 3, SSD1306_WHITE);
+    }
+    const auto sample = ultrasonic.snapshot();
+    _display.setCursor(0, 56); _display.printf("A:%3d", radarServo.angle());
+    _display.setCursor(40, 56);
+    if (sample.available) _display.printf("%3ucm", unsigned(sample.distanceCm + 0.5f));
+    else _display.print(ultrasonic.enabled() ? "S/ECO" : "OFF");
+    _display.setCursor(92, 56); _display.print("BOTAO");
+    _display.display();
+}
+
 void OledDisplay::atualizarPainel(TimeManager& hora, NetworkController& rede, StorageManager& sd)
 {
     if (!_inicializado)
         return;
     uint32_t now = millis();
+    const auto sonar = ultrasonic.snapshot();
+    if (sonar.sequence != _ultimaSequenciaSonar) {
+        _ultimaSequenciaSonar = sonar.sequence;
+        if (sonar.available && sonar.angleKnown && sonar.angle >= 5 && sonar.angle <= 175) {
+            const int bin = constrain((sonar.angle - 5 + 2) / 5, 0, 34);
+            _ecosSonar[bin].cm = uint16_t(sonar.distanceCm + 0.5f);
+            _ecosSonar[bin].at = now - sonar.ageMs;
+        }
+    }
+    if (_pagina == 7 && !_exibirProgresso && !_protetorAtivo) {
+        desenharSonar(now);
+        return; // Sticky sonar page: only explicit navigation changes the page.
+    }
+    // Camera is a sticky page: no automatic rotation, console overlay or idle saver.
+    // Only copy the latest prepared 1 KiB frame; sensor capture stays on its worker.
+    if (_pagina == 6 && !_exibirProgresso && !_protetorAtivo) {
+        if (now - _ultimoPainel < 1000) return;
+        _ultimoPainel = now;
+        uint8_t pixels[SCREEN_WIDTH * SCREEN_HEIGHT / 8];
+        _display.clearDisplay();
+        if (camera.copyOled(pixels, sizeof(pixels))) {
+            memcpy(_display.getBuffer(), pixels, sizeof(pixels));
+            _imagemCamera = true;
+        } else {
+            _imagemCamera = false;
+            _display.setTextSize(1);
+            _display.setTextColor(SSD1306_WHITE);
+            _display.setCursor(0, 16);
+            _display.println("CAMERA");
+            _display.println("Sem imagem recente");
+            _display.println("Botao: proxima tela");
+        }
+        _display.display();
+        return;
+    }
     if (_imagemCamera && !_exibirProgresso && int32_t(_consoleAte - now) > 0) return;
     _imagemCamera = false;
-    if (!_exibirProgresso && _protetorAutomatico && now - _ultimaAtividade >= _tempoProtetor)
+    if (_pagina < 6 && !_exibirProgresso && _protetorAutomatico && now - _ultimaAtividade >= _tempoProtetor)
         iniciarProtetor();
     if (_protetorAtivo) { desenharRobo(now); return; }
     if (_exibirProgresso || int32_t(_consoleAte - now) > 0)
@@ -274,12 +361,6 @@ void OledDisplay::atualizarPainel(TimeManager& hora, NetworkController& rede, St
     if (now - _ultimoPainel < 1000)
         return;
     _ultimoPainel = now;
-    if (_autoPaginas && now - _ultimaPagina >= 8000)
-    {
-        _pagina = (_pagina + 1) % 6;
-        _ultimaPagina = now;
-        if (_aoTrocarPagina) _aoTrocarPagina();
-    }
     _display.clearDisplay();
     _display.setTextSize(1);
     _display.setTextWrap(false);
@@ -289,7 +370,7 @@ void OledDisplay::atualizarPainel(TimeManager& hora, NetworkController& rede, St
     _display.setCursor(0, 0);
     _display.print(titles[_pagina]);
     _display.setCursor(110, 0);
-    _display.printf("%u/6", _pagina + 1);
+    _display.printf("%u/8", _pagina + 1);
     _display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
     auto line = [&](int row, const String& text)
     {

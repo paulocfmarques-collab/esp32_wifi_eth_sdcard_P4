@@ -14,7 +14,6 @@ class OledDisplay
     Adafruit_SSD1306 _display;
     bool _inicializado;
     uint8_t _pagina = 0;
-    bool _autoPaginas = true;
     bool _imagemCamera = false;
     uint32_t _ultimaPagina = 0, _ultimoPainel = 0, _consoleAte = 0;
     uint32_t _ultimaAtividade = 0, _ultimoRobo = 0, _frameRobo = 0;
@@ -22,6 +21,10 @@ class OledDisplay
     bool _protetorAtivo = false, _protetorAutomatico = true;
     void (*_aoTrocarPagina)() = nullptr;
     void desenharRobo(uint32_t now);
+    void desenharSonar(uint32_t now);
+    struct SonarEcho { uint16_t cm = 0; uint32_t at = 0; };
+    SonarEcho _ecosSonar[35] = {};
+    uint32_t _ultimaSequenciaSonar = 0;
 
     // Reduzido para 5 linhas móveis para sobrar espaço para a barra de progresso na base
     static const int MAX_LINHAS_TERMINAL = 5;

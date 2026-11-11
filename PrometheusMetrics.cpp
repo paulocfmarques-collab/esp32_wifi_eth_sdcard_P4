@@ -10,6 +10,8 @@
 #include "SystemLog.h"
 #include "UsbHostService.h"
 #include "DeviceConfig.h"
+#include "UltrasonicService.h"
+#include "RadarServo.h"
 #include <Preferences.h>
 #include <WiFi.h>
 #include <ETH.h>
@@ -401,6 +403,17 @@ void PrometheusMetrics::metrics(WebServer& server)
     emit("mqtt_messages_received", String(mqtt.received()), "", true);
     emit("mqtt_publish_errors", String(mqtt.errors()), "", true);
     emit("esp_edge_enabled", edge.enabled() ? "1" : "0");
+    const auto sonar = ultrasonic.snapshot();
+    emit("ultrasonic_available", sonar.available ? "1" : "0");
+    emit("radar_tracking_enabled", radarServo.trackingEnabled() ? "1" : "0");
+    emit("radar_target_locked", radarServo.targetLocked() ? "1" : "0");
+    emit("radar_target_distance_cm", radarServo.targetLocked() ? String(radarServo.trackedDistance(), 2) : "NaN");
+    emit("radar_target_angle_degrees", radarServo.targetLocked() ? String(radarServo.trackedAngle()) : "NaN");
+    emit("ultrasonic_distance_cm", sonar.available ? String(sonar.distanceCm, 2) : "NaN");
+    emit("ultrasonic_servo_angle_degrees", sonar.angleKnown ? String(sonar.angle) : "NaN");
+    emit("ultrasonic_samples_total", String(sonar.samples), "", true);
+    emit("ultrasonic_errors_total", String(sonar.errors), "", true);
+    emit("ultrasonic_sample_age_seconds", sonar.samples || sonar.errors ? String(sonar.ageMs / 1000.0f, 3) : "NaN");
     emit("camera_initialized", camera.ready() ? "1" : "0");
     emit("usb_host_up", usbHost.ready() ? "1" : "0");
     emit("usb_hid_reports_total", String(usbHost.reports()), "", true);

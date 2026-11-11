@@ -1,11 +1,98 @@
 # Mapa de pinos e esquema de ligações — ESP32-P4
 
+## Tela sonar permanente — 1.25.0 (06/11/2026)
+
+Nova oitava tela OLED: sonar semicircular com escala de 4 m, direção do servo, ecos reais por ângulo e marcador de alvo acompanhado. Permanece até o botão ou navegação explícita, sem protetor automático nem sobreposição do terminal; OTA tem prioridade. Abra com tela:7 ou pelo atalho Sonar no OLED no portal/Home Assistant. Botão sai para o relógio. Não liga o motor automaticamente. [Funcionamento e validação da tela sonar](SONAR_OLED.md). Firmware não compilado nem gravado; teste físico pendente.
+
+## Busca rápida e acompanhamento — 1.24.0 (06/11/2026)
+
+Com HC-SR04 habilitado, o radar busca em passos de 5° por medição concluída, sem esperar o stream. Duas leituras consistentes entre 10 e 200 cm confirmam um alvo; a câmera passa a apontar para a região e o servo faz sondagens locais para acompanhar o deslocamento. Ao perder o alvo, amplia a sondagem e retoma a busca. Faixa continua 5°–175°, com motor desligado ao iniciar. servo:on ativa a busca; servo:rastrear:on|off habilita/desabilita acompanhamento. Ângulo manual e servo:off assumem controle. Novo indicador e botões no Home Assistant; atributos MQTT e métricas Prometheus de alvo. Veja [funcionamento, comandos e limites do acompanhamento](RADAR_TRACKING.md).
+
+É acompanhamento aproximado por distância em um eixo: não identifica visualmente o objeto nem altera o foco óptico. Paredes e outros ecos podem ser confundidos. Substitui a varredura sincronizada ao stream enquanto o ultrassom estiver habilitado. Firmware não compilado nem gravado; teste físico pendente.
+
+## Ultrassom HC-SR04 — 1.23.0 (06/11/2026)
+
+Adicionado HC-SR04: TRIG no GPIO3/P6 físico 19 e ECHO no GPIO4/P6 físico 18, **com divisor resistivo obrigatório para reduzir o ECHO de 5 V**. VCC 5 V e GND comum. Veja [ligação, divisor, comandos e validação do HC-SR04](HC_SR04.md).
+
+Leitura por interrupção, timeout 30 ms e intervalo mínimo 100 ms; aguarda estabilização do servo e associa distância/ângulo da mesma aquisição. Habilitado ao iniciar; comandos ultrasonic:on|off|status no terminal e MQTT. Home Assistant ganha distância, ângulo da leitura e botões de controle; Prometheus ganha disponibilidade, distância, ângulo, leituras, erros e idade. Leituras inválidas ficam indisponíveis. Há resumo no SD e pausa em OTA. Servo continua 5°–175° e sincronizado ao stream. Não há ainda perseguição automática de alvo. Firmware não compilado nem gravado; validação física pendente.
+
+## Servo 5°–175° e Home Assistant — 1.22.0 (06/11/2026)
+
+Faixa atual do servo: **5°–175° nominais**, no mesmo GPIO2 / P6 pino 21, com a mesma alimentação externa e GND comum. Aceita servo:angulo:5 até servo:angulo:175. Inicia desligado; servo:on inicia a varredura, servo:off remove pulsos e servo:status consulta o estado. Mantém o sincronismo com o streaming: até 2° por quadro novo enviado, mínimo 200 ms; aproximadamente 17 segundos por percurso se atingir 5 fps. Esta faixa substitui os limites de versões anteriores.
+
+Com MQTT configurado e conectado ao broker usado pelo Home Assistant, a descoberta adiciona ao mesmo dispositivo ESP32-P4:
+
+| Entidade | Ação / leitura |
+| --- | --- |
+| Botão Iniciar radar | servo:on |
+| Botão Parar servo | servo:off |
+| Botão Centralizar servo | servo:angulo:90 |
+| Botão Atualizar estado do servo | servo:status e publicação do estado |
+| Controle Angulo do servo | Deslizante 5–175°, passo 1°; escolher posição encerra a varredura e mantém posição fixa |
+| Sensor Estado do servo | desligado, varrendo, fixo, pausado ou falha; atributos com ângulo comandado, alvo e limites |
+
+O deslizante acompanha o ângulo comandado, sem sensor de posição física. O estado é publicado em esp32/<id>/servo/state, retido, a cada segundo, sem acelerar a telemetria geral de 30 segundos. Comandos vão para esp32/<id>/command, não retidos, com os mesmos limites da Serial/web. Payloads inválidos, fora da faixa ou retidos são ignorados pelo receptor MQTT.
+
+Após gravar o firmware e conectar ao broker, as novas entidades são anunciadas automaticamente. A descoberta também é reenviada na reconexão MQTT e ao receber homeassistant/status=online. IDs das entidades existentes preservados. Referência: [Home Assistant — MQTT Number](https://www.home-assistant.io/integrations/number.mqtt/). Firmware não compilado nem gravado; integração física/real pendente de validação.
+
+## Sincronismo radar / streaming — 1.21.2 (06/11/2026)
+
+A captura JPEG agora tem alvo de 5 fps (200 ms), e o MJPEG acompanha quadros novos, sem a pausa extra de 500 ms após cada envio. A varredura do servo fica limitada a **2° por quadro novo transmitido**, com intervalo mínimo de 200 ms: aproximadamente **14 segundos por percurso de 20° a 160°**, se atingir 5 fps. A rede mais lenta reduz a velocidade da varredura. Não há avanço em rajada para recuperar atraso.
+
+Com espectadores, o sincronismo usa o quadro mais recente enviado com sucesso a algum cliente. Um segundo espectador lento não faz o contador retroceder. Isso mede envio pelo dispositivo, não confirmação de exibição pelo navegador. Sem espectadores acompanha a captura; sem câmera disponível, funciona como radar independente com passo de 2°/200 ms. Posição fixa (servo:angulo:N) continua com passo de 1°/20 ms. Essas regras substituem a velocidade documentada nas versões anteriores.
+
+Use camera_status para conferir target_fps, frames, stream_frames, stream_clients, last_stream_frame e age_seconds; servo:status informa o modo de sincronismo. FPS real depende da resolução, processamento e rede. O OLED permanece atualizando a foto uma vez por segundo. Rotação de 180°, portas e limite de dois espectadores preservados. Firmware não compilado nem gravado; validação no dispositivo pendente.
+
+## Servo radar — 1.21.1 (06/11/2026)
+
+Servo posicional de 180°, com varredura de ida e volta entre 20° e 160° nominais. Sinal no **GPIO2, pino físico 21 do conector P6**. PWM de 50 Hz/14 bits, passo de 1° a cada 20 ms (2,8 s por percurso, sem contar atrasos do ciclo). Inicia desligado a cada reinício. Não altera OLED, câmera, botão ou partições.
+
+### Ligação do servo
+
+| Fio / função (confira o modelo) | Ligação |
+| --- | --- |
+| Sinal, geralmente amarelo/laranja/branco | GPIO2, P6 pino físico 21 |
+| V+, geralmente vermelho | Positivo de fonte externa na tensão especificada pelo servo, normalmente 5 V |
+| GND, geralmente marrom/preto | Negativo da fonte externa **e** GND da placa, por exemplo P6 pino físico 39 |
+
+```text
+P6 [21] GPIO2 -------------------- Sinal do servo
+Fonte externa +5 V --------------- V+ do servo (se compatível com o modelo)
+Fonte externa GND -----+---------- GND do servo
+P6 [39] GND -----------+
+```
+
+Não alimente o motor pelo GPIO nem pela saída 3V3. Dimensione a fonte para a corrente de partida/travamento do modelo. A fonte externa alimenta o servo, com terra comum; mantenha a alimentação normal da placa. Referência: [Arduino — alimentação e diagnóstico de servos](https://support.arduino.cc/hc/en-us/articles/360017053760-Troubleshoot-servo-motors).
+
+### Controle pela Serial, UDP ou terminal web
+
+- `servo:on`: inicia/retoma a varredura.
+- `servo:off`: remove os pulsos; o servo pode perder força de sustentação.
+- `servo:angulo:90`: move gradualmente até uma posição fixa (aceita 20 a 160).
+- `servo:status`: estado do PWM e ângulo comandado; não há sensor de posição real.
+
+O portal tem atalhos Iniciar radar, Parar servo e Estado do servo. Movimento por temporização sem delay, sem recuperação de passos acumulados em rajada; OTA suspende o controle. Estados e falhas são registrados no SD, sem log de cada passo. Não há persistência de ativação nem novas métricas Prometheus nesta versão.
+
+O perfil usa pulsos de 1000–2000 µs mapeados para 0–180° nominais, mas a varredura fica limitada a 20–160°. Os graus reais dependem do modelo; sem modelo confirmado, não use os extremos mecânicos. Limites e intervalo ficam em DeviceConfig.h. Firmware não compilado nem gravado; funcionamento físico pendente.
+
+## Protetor automático — 1.20.6 (06/11/2026)
+
+O protetor de robô entra após 60 segundos de inatividade nas seis telas de informações. A câmera (tela:6) é a exceção: permanece exibindo a foto, atualizada a cada segundo. A navegação continua pelo botão GPIO27, sem rotação automática das páginas. O botão acorda o OLED e avança uma tela. Esta configuração substitui a desativação padrão do protetor descrita na versão 1.20.5.
+
+## Navegação pelo botão — 1.20.5 (06/11/2026)
+
+As sete telas permanecem selecionadas até avançar pelo botão GPIO27; não há rotação por tempo. O protetor automático vem desativado. A câmera mantém a foto atualizada a cada segundo. Comandos explícitos de tela e protetor continuam disponíveis; tela:auto apenas retoma a tela selecionada, sem iniciar troca automática. No portal, esse atalho se chama Retomar tela. Esta regra substitui as descrições anteriores de rotação automática.
+
+## Tela permanente da câmera — 1.20.2 (06/11/2026)
+
+A câmera é a sétima tela da sequência (tela:6). Atualiza a foto em preto e branco, em tela inteira, a cada segundo e permanece até pressionar o botão GPIO27 ou enviar tela:next/outro comando de tela. Nessa tela, a rotação e o protetor automáticos ficam suspensos; mensagens de terminal não cobrem a foto. OTA tem prioridade. camera_oled também abre essa tela, sem o antigo limite de 10 segundos. Se não houver quadro recente, aparece um aviso e a tentativa se repete a cada segundo. Ao sair pelo botão, volta ao relógio e retoma a rotação habitual.
+
 ## Olhos digitais — 1.20.1 (25/10/2026)
 
 O protetor de tela usa duas íris circulares com pupila escura, anéis e traços radiais animados, inspirados na imagem de referência. Mantém o piscar e as expressões, em preto e branco no OLED 128 × 64. Após compilar e gravar, use protetor:on para visualizar. Esta alteração não muda pinos, comandos ou métricas.
 
 
-Revisão: **25/10/2026**. Referência do código: **v1.20.1**, placa **Waveshare ESP32-P4-Module-DEV-KIT**, pacote Arduino ESP32 **3.3.12**, variante `esp32p4`.
+Revisão: **06/11/2026**. Referência do código: **v1.25.0**, placa **Waveshare ESP32-P4-Module-DEV-KIT**, pacote Arduino ESP32 **3.3.12**, variante `esp32p4`.
 
 Este documento combina a configuração do firmware, os padrões do SDK e o esquema elétrico da placa. As ligações internas já existem na placa; não precisam de jumpers externos. OLED e botão são as ligações externas descritas pelo projeto; câmera e alto-falante usam seus conectores próprios.
 
@@ -50,6 +137,9 @@ Direções são relativas ao ESP32-P4.
 | GPIO | Sinal | Direção | Ligação / uso | Origem |
 | ---: | --- | --- | --- | --- |
 | 1 | LED lógico | Saída | `led_on`, `led_off`, sinalização da conexão e interruptor MQTT; carga externa não confirmada | `LED_PIN` |
+| 2 | Servo radar | PWM de saída, 50 Hz | Sinal do servo no P6 pino físico 21; alimentação externa e GND comum | `SERVO_PIN` |
+| 3 | HC-SR04 TRIG | Saída | P6 pino físico 19 → TRIG, pulso de 12 µs | `ULTRASONIC_TRIG_PIN` |
+| 4 | HC-SR04 ECHO | Entrada com interrupção | P6 pino físico 18 ← divisor resistivo do ECHO; não ligar 5 V direto | `ULTRASONIC_ECHO_PIN` |
 | 7 | SDA | Bidirecional | OLED, ES8311 e SCCB da câmera no mesmo barramento | `PIN_SDA` / Wire |
 | 8 | SCL | Clock de saída | Clock do mesmo barramento I²C | `PIN_SCL` / Wire |
 | 9 | I2S DOUT | Saída | ESP32-P4 → **DSDIN do ES8311** | `AUDIO_DOUT` |
@@ -260,7 +350,7 @@ Estar no P6 **não significa estar disponível**. GPIO7/8, 1, 27, 45, 53 e 54 j�
 | DSI | Pads dedicados do conector DISPLAY | Nenhum LCD DSI inicializado |
 | Flash e PSRAM | Ligações internas do módulo/encapsulamento | Não são os pinos SDMMC nem ligações externas para remontar |
 
-GPIOs sem atribuição funcional explícita pelo aplicativo no P6 incluem **0, 2, 3, 4, 5, 6, 20, 21, 22, 23, 26, 32, 33, 36, 46, 47 e 48**. Essa lista não garante ausência de função alternativa, strapping ou ligação no circuito; veja a tabela de reservas antes de acrescentar periféricos.
+GPIOs sem atribuição funcional explícita pelo aplicativo no P6 incluem **0, 5, 6, 20, 21, 22, 23, 26, 32, 33, 36, 46, 47 e 48**. GPIO2 pertence ao servo radar; GPIO3/4 ao HC-SR04. Essa lista não garante ausência de função alternativa, strapping ou ligação no circuito; veja a tabela de reservas antes de acrescentar periféricos.
 
 ## 9. Conferência rápida de conflitos
 

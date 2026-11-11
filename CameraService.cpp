@@ -1,6 +1,7 @@
 #include "CameraService.h"
 #include "PortalUi.h"
 #include "SystemLog.h"
+#include "DeviceConfig.h"
 #include <ArduinoJson.h>
 #include <esp32-hal-i2c.h>
 #include <esp_heap_caps.h>
@@ -34,6 +35,7 @@ void CameraService::fail(const char* message) {
     _capture.end(); _video.end();
     if (_encoder) { jpeg_del_encoder_engine(_encoder); _encoder = nullptr; }
     for (auto& buffer : _buffers) { free(buffer); buffer = nullptr; }
+    free(_rotated); _rotated = nullptr;
     if (_mutex) { vSemaphoreDelete(_mutex); _mutex = nullptr; }
     Serial.printf("[CAMERA] %s\n", message);
     systemLog.record("CAMERA", "falha: %s", message);
@@ -61,8 +63,15 @@ void CameraService::begin() {
     _buffers[0] = static_cast<uint8_t*>(jpeg_alloc_encoder_mem(requested, &memory, &_capacity));
     size_t secondCapacity = 0;
     _buffers[1] = static_cast<uint8_t*>(jpeg_alloc_encoder_mem(requested, &memory, &secondCapacity));
+    // Separate encoder input: keep the camera's DMA capture buffer untouched.
+    memory.buffer_direction = JPEG_ENC_ALLOC_INPUT_BUFFER;
+    size_t rotatedCapacity = 0;
+    const size_t rgbBytes = size_t(_width) * _height * 2;
+    _rotated = static_cast<uint8_t*>(jpeg_alloc_encoder_mem(rgbBytes, &memory, &rotatedCapacity));
     _mutex = xSemaphoreCreateMutex();
-    if (!_buffers[0] || !_buffers[1] || !_mutex) { fail("Memoria insuficiente para JPEG"); return; }
+    if (!_buffers[0] || !_buffers[1] || !_rotated || rotatedCapacity < rgbBytes || !_mutex) {
+        fail("Memoria insuficiente para JPEG/rotacao"); return;
+    }
     _capacity = min(_capacity, secondCapacity);
     if (!_capture.startCapture()) { fail("Falha ao iniciar captura CSI"); return; }
     if (xTaskCreatePinnedToCore(run, "camera_jpeg", 8192, this, 1, &_task, 0) != pdPASS) {
@@ -70,7 +79,8 @@ void CameraService::begin() {
     }
     _error = "nenhum"; _ready = true;
     systemLog.record("CAMERA", "OV5647 iniciada %ux%u", _width, _height);
-    Serial.printf("[CAMERA] OV5647 CSI: %ux%u; JPEG ate 2 imagens/s.\n", _width, _height);
+    Serial.printf("[CAMERA] OV5647 CSI: %ux%u; JPEG alvo %lu imagens/s.\n", _width, _height,
+                  (unsigned long)(1000 / CAMERA_FRAME_INTERVAL_MS));
 }
 
 void CameraService::run(void* context) {
@@ -82,21 +92,30 @@ void CameraService::run(void* context) {
         auto frame = self._capture.captureBuffer();
         if (!frame.valid()) { self._captureError = 1; ++self._errors; vTaskDelay(pdMS_TO_TICKS(200)); continue; }
         if (int32_t(millis() - nextEncode) < 0) { vTaskDelay(1); continue; }
-        nextEncode = millis() + 500;
+        nextEncode = millis() + CAMERA_FRAME_INTERVAL_MS;
         if (self._paused) continue;
         if (frame.size() < size_t(self._width) * self._height * 2) { self._captureError = 2; ++self._errors; continue; }
+        // Reverse complete RGB565 pixels (not their bytes) for a 180-degree rotation.
+        // JPEG, MJPEG, Home Assistant and OLED all consume this same orientation.
+        const size_t pixelCount = size_t(self._width) * self._height;
+        const uint8_t* source = frame.data();
+        for (size_t i = 0; i < pixelCount; ++i) {
+            const size_t from = (pixelCount - 1 - i) * 2;
+            self._rotated[i * 2] = source[from];
+            self._rotated[i * 2 + 1] = source[from + 1];
+        }
         jpeg_encode_cfg_t config = {};
         config.width = self._width; config.height = self._height;
         config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
         config.sub_sample = JPEG_DOWN_SAMPLING_YUV422; config.image_quality = 70;
         unsigned back = 1 - self._front;
         uint32_t size = 0;
-        if (jpeg_encoder_process(self._encoder, &config, frame.data(), frame.size(),
+        if (jpeg_encoder_process(self._encoder, &config, self._rotated, pixelCount * 2,
                                  self._buffers[back], self._capacity, &size) != ESP_OK || !size || size > self._capacity) {
             self._captureError = 3; ++self._errors; continue;
         }
         uint8_t mono[1024];
-        oledFrame(frame.data(), self._width, self._height, mono);
+        oledFrame(self._rotated, self._width, self._height, mono);
         if (xSemaphoreTake(self._mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
             self._front = back; self._length = size; self._lastFrameMs = millis(); ++self._frames;
             memcpy(self._monochrome, mono, sizeof(mono));
@@ -123,6 +142,8 @@ String CameraService::status() {
     doc["available"] = available();
     doc["stream_port"] = _streamPort; doc["stream_path"] = "/stream";
     doc["stream_clients"] = streamClients(); doc["stream_frames"] = streamFrames(); doc["stream_errors"] = streamErrors();
+    doc["target_fps"] = 1000 / CAMERA_FRAME_INTERVAL_MS;
+    doc["last_stream_frame"] = lastStreamFrame();
     doc["snapshot_clients"] = _snapshotClients.load(); doc["rejected_clients"] = _rejectedClients.load();
     doc["heap_free"] = ESP.getFreeHeap(); doc["psram_free"] = ESP.getFreePsram();
     switch (_captureError.load()) {
@@ -136,12 +157,15 @@ String CameraService::status() {
     String json; serializeJson(doc, json); return json;
 }
 
-uint8_t* CameraService::copyFrame(size_t& length) {
+uint8_t* CameraService::copyFrame(size_t& length, uint32_t* sequence) {
     length = 0;
     if (!available() || !_mutex || xSemaphoreTake(_mutex, pdMS_TO_TICKS(10)) != pdTRUE) return nullptr;
     length = _length;
     auto copy = static_cast<uint8_t*>(heap_caps_malloc(length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (copy) memcpy(copy, _buffers[_front], length);
+    if (copy) {
+        memcpy(copy, _buffers[_front], length);
+        if (sequence) *sequence = _frames.load();
+    }
     xSemaphoreGive(_mutex);
     return copy;
 }
@@ -216,7 +240,7 @@ void CameraService::streamWorker(void* context) {
         uint32_t sequence = self.frames();
         if (previous == sequence) { vTaskDelay(pdMS_TO_TICKS(20)); continue; }
         size_t length;
-        auto jpeg = self.copyFrame(length);
+        auto jpeg = self.copyFrame(length, &sequence);
         if (!jpeg) { ++self._streamErrors; break; }
         char header[120];
         int count = snprintf(header, sizeof(header), "--p4frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", unsigned(length));
@@ -226,7 +250,12 @@ void CameraService::streamWorker(void* context) {
         if (result == ESP_OK) result = httpd_resp_send_chunk(request, "\r\n", 2);
         if (result != ESP_OK) { ++self._streamErrors; break; }
         ++self._streamFrames; previous = sequence;
-        vTaskDelay(pdMS_TO_TICKS(500));
+        // A slower second viewer must not move the shared sequence backwards.
+        uint32_t delivered = self._lastStreamFrame.load();
+        while (int32_t(sequence - delivered) > 0 &&
+               !self._lastStreamFrame.compare_exchange_weak(delivered, sequence)) {}
+        // No second frame-rate limiter: wait only for the next captured frame.
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     if (result == ESP_OK) {
         httpd_resp_send_chunk(request, "--p4frame--\r\n", HTTPD_RESP_USE_STRLEN);
@@ -303,6 +332,6 @@ void CameraService::routes(WebServer& server, bool (*busy)()) {
 
 String CameraService::page() {
     return portalStart("Camera", false, false, false, false, false, true) +
-        F("<header class='page-header'><h1>Câmera OV5647</h1></header><section class='card'><p>Vídeo MJPEG até 2 imagens por segundo, com até dois espectadores. Captura local, sem enviar imagens ao broker MQTT.</p>") +
+        F("<header class='page-header'><h1>Câmera OV5647</h1></header><section class='card'><p>Vídeo MJPEG com alvo de 5 imagens por segundo, com até dois espectadores. A varredura do servo acompanha os quadros enviados. Captura local, sem enviar imagens ao broker MQTT.</p>") +
         FPSTR(CAMERA_VIEW) + F("</section>") + portalEnd();
 }
