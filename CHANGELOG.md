@@ -1,368 +1,182 @@
 # Changelog
 
-## 1.25.0 — 2026-11-06
-
-- Adiciona oitava tela OLED, sonar semicircular de alcance 4 m, com anéis de 1 m, feixe no ângulo comandado ao servo e ecos reais do HC-SR04.
-- Histórico limitado a 35 setores de 5°, pontos recentes maiores, persistência de 6 s e marcador do alvo acompanhado. Sem inventar ecos quando a leitura é inválida.
-- Sonar permanece selecionado até navegação explícita, sem protetor automático nem sobreposição do terminal; botão avança para relógio. Câmera continua com o mesmo comportamento permanente.
-- `tela:7` abre diretamente; atalhos no portal e descoberta MQTT do Home Assistant. Comandos de tela passam a aceitar 0..7. Não liga o motor automaticamente.
-- Atualização do desenho limitada a 150 ms; captura de ecos usa dados existentes. Documentação atualizada, sem compilação/gravação ou teste físico.
-
-## 1.24.0 — 2026-11-06
-
-- Busca com HC-SR04 passa a avançar 5° por tentativa de medição concluída, após estabilização; deixa de esperar o stream nesse modo. Faixa mecânica permanece 5°–175°.
-- Confirma alvo entre 10–200 cm com dois ecos independentes próximos, aponta a câmera para a direção e acompanha aproximadamente por sondagens centro/±6°. Amplia para ±12° ao perder ecos e volta à busca após três ciclos inválidos ou perda prolongada.
-- Associa sequência e comando de posição a cada tentativa, evitando dupla confirmação ou uso de distância antiga em outro ângulo. Mantém timeout/ausência de eco sem distância inventada.
-- Adiciona `servo:rastrear:on|off`, botões no portal/MQTT, indicador Alvo no radar e métricas/atributos de alvo e rastreamento. Posição manual assume controle; off/OTA descartam o alvo.
-- Acompanhamento por ultrassom em um eixo, sem identificação visual ou foco óptico. Parâmetros e limitações em RADAR_TRACKING.md. Firmware não compilado nem testado na placa.
-
-## 1.23.0 — 2026-11-06
-
-- Adiciona HC-SR04 no GPIO3/TRIG (P6 19) e GPIO4/ECHO (P6 18), exigindo divisor resistivo no ECHO de 5 V.
-- Captura bordas por interrupção, pulso TRIG de 12 µs, intervalo mínimo 100 ms e timeout 30 ms. Sem pulseIn nem espera bloqueante pelo eco.
-- Aguarda 100 ms desde o último comando PWM antes da medição e segura avanços automáticos do servo durante o eco. Distância e ângulo da mesma aquisição; ângulo é comandado, sem sensor físico de posição. Sem eco/fora de 2–400 cm/dado com mais de 1 s: indisponível, nunca zero inventado.
-- Comandos ultrasonic:on|off|status; habilitado ao iniciar, independente do servo. Pausa durante OTA. Resumos SD a cada minuto, sem log de cada eco.
-- Home Assistant MQTT adiciona distância, ângulo da leitura e botões de ligar/desligar/consultar ultrassom. Prometheus adiciona disponibilidade, distância, ângulo e contadores de leituras/erros/idade.
-- Não implementa perseguição automática de alvo. Firmware não compilado nem gravado; sensor e comportamento físico precisam de validação.
-
-## 1.22.0 — 2026-11-06
-
-- Amplia a varredura e o posicionamento do servo para 5°–175° nominais, mantendo sincronismo com o streaming (2° por novo quadro, mínimo 200 ms; cerca de 17 s por percurso a 5 fps).
-- Descoberta MQTT do Home Assistant adiciona quatro botões: iniciar radar, parar servo, centralizar em 90° e atualizar estado; adiciona controle numérico de ângulo 5–175° e sensor de estado.
-- Publica modo/ângulo comandado/alvo/limites em `/servo/state` a cada segundo, separado da telemetria geral de 30 s. Não há sensor de posição física.
-- Aceita comandos MQTT de servo explicitamente permitidos e ângulos inteiros validados; ignora mensagens de comando retidas. Mantém IDs das entidades anteriores e execução de hardware no ciclo da aplicação.
-- Firmware não compilado nem gravado; descoberta e comandos ainda precisam de validação no Home Assistant real.
-
-## 1.21.2 — 2026-11-06
-
-- Alvo de captura JPEG passa de 2 para 5 fps. Remove a pausa adicional de 500 ms após cada envio MJPEG; cada cliente aguarda um novo quadro.
-- Associa o número do quadro ao JPEG sob o mesmo mutex e registra o último quadro transmitido com sucesso, sem retroceder por causa de um segundo cliente lento.
-- Radar avança no máximo 2° por quadro novo enviado, com intervalo mínimo de 200 ms (cerca de 14 s por percurso a 5 fps). Sem clientes, acompanha captura; sem câmera disponível, usa temporizador de 200 ms. Posicionamento fixo mantém 1°/20 ms.
-- `camera_status` informa target_fps/last_stream_frame e `servo:status` informa modo de sincronismo. OLED continua em uma foto por segundo.
-- Alvo de fps depende da resolução, processamento e rede; envio concluído não comprova exibição no navegador. Não houve compilação nem teste físico.
-
-## 1.21.1 — 2026-11-06
-
-- Amplia a varredura e o posicionamento manual do servo para 20°–160° nominais. Mantém passo de 1° a cada 20 ms, aproximadamente 2,8 s por percurso.
-- Atualiza ajuda dos comandos e documentação. Firmware não compilado nem gravado.
-
-## 1.21.0 — 2026-11-06
-
-- Adiciona servo posicional tipo radar no GPIO2 (P6 pino 21), PWM LEDC 50 Hz/14 bits, sem biblioteca adicional.
-- Inicia desligado. `servo:on` varre entre 30° e 150° nominais, 1° a cada 20 ms; `servo:off` remove pulsos; `servo:angulo:30..150` posiciona gradualmente; `servo:status` informa estado e ângulo comandado, sem realimentação.
-- Movimento não bloqueante no ciclo principal, suspenso durante OTA. Logs de início, comandos e falhas no SD; sem log por passo.
-- Documenta fonte externa adequada ao servo e GND comum; adiciona atalhos no terminal web.
-- Firmware não compilado nem gravado; PWM e movimento ainda precisam de validação no hardware.
-
-## 1.20.6 — 2026-11-06
-
-- Reativa o protetor automático após 60 segundos de inatividade nas seis telas de informações. A câmera (tela:6) permanece excluída.
-- Mantém a navegação pelo botão, sem rotação automática das páginas, e a foto da câmera atualizada a cada segundo.
-
-## 1.20.5 — 2026-11-06
-
-- Remove a rotação temporizada das sete telas: GPIO27 avança uma tela por pressionamento e mantém a seleção.
-- Protetor automático desativado por padrão para não substituir a tela por inatividade. A ativação explícita por comando continua disponível.
-- `tela:auto` permanece compatível, mas apenas retoma a tela selecionada, sem habilitar temporizador. Comandos manuais de tela continuam disponíveis.
-- Câmera continua atualizando a foto a cada segundo enquanto selecionada.
-
-## 1.20.4 — 2026-11-06
-
-- Aplica rotação de 180° antes da codificação JPEG, incluindo fotos, streaming MJPEG e Home Assistant. O OLED usa o mesmo quadro, sem aplicar uma segunda rotação.
-- Buffer de entrada próprio alocado uma vez pelo alocador JPEG; preserva o buffer DMA da captura. A atualização do OLED continua em uma foto por segundo.
-
-## 1.20.3 — 2026-11-06
-
-- Gira em 180° a imagem da câmera exibida no OLED, preservando a atualização de uma foto por segundo. JPEG e streaming mantêm sua orientação.
-
-## 1.20.2 — 2026-11-06
-
-- Adiciona a sétima tela OLED, câmera em tela inteira, com atualização do último quadro disponível a cada segundo.
-- Ao chegar à câmera, mantém a tela até o botão GPIO27 ou um comando de navegação; não entra automaticamente no protetor nem troca por mensagens do terminal. OTA continua com prioridade.
-- `camera_oled` e `tela:6` selecionam essa tela. Se faltar imagem recente, mostra diagnóstico e tenta novamente a cada segundo.
-- Captura continua na tarefa da câmera; OLED apenas copia o quadro monocromático já preparado.
-
-## 1.20.1 — 2026-10-25
-
-- Olhos do robô redesenhados com íris circulares, pupilas escuras, anéis e traços radiais animados, inspirados na referência de olho digital.
-- Mantidos o piscar, as expressões e a navegação do protetor. Desenho adaptado ao OLED monocromático de 128 × 64 pixels.
-- Firmware não compilado nem gravado; validação visual no dispositivo pendente.
-
-## 1.20.0 — 2026-10-22
-
-- Habilita USB Host HS com teclado/mouse HID e um pendrive MSC FAT, tarefa dedicada, montagem sem formatação e listagem limitada em cache.
-- Adiciona página /usb, APIs e comandos usb_status, usb_list, usb_rescan e log_status.
-- Amplia eventos no SD com fila limitada, metadados de rede/HTTP/UDP/MQTT/USB/câmera/OTA e resumos periódicos; filtra conteúdo sensível e captura avisos/erros SDK sem recursão de falhas SD.
-- Rotaciona /log.txt em 1 MiB com quatro históricos. Adiciona métricas USB e de descarte/rotação. Atualiza mapa e guias.
-- 75 testes passaram; sem compilação ou validação física USB/SD.
-
-
-## Documentação de hardware — 2026-10-22
-
-- Adiciona [MAPA_PINOS_E_ESQUEMA.md](MAPA_PINOS_E_ESQUEMA.md), com GPIOs explícitos/implícitos, mapa P6 de 40 pinos, esquema funcional e ligações de OLED, botão, áudio, câmera, Ethernet, SD e rádio.
-- Distingue sinais internos, funções não habilitadas e ligações externas não verificadas. Sem alteração de firmware ou compilação.
-
-
-## 1.19.1 — 2026-10-22
-
-- Amplia mqtt_status com tipo de erro, recusa do broker, errno de socket/transporte, desconexões, memória e estado da rede.
-
-- Remove transferência JPEG do ciclo da aplicação: /camera.jpg redireciona para /snapshot no servidor da câmera, com tarefa de envio limitada a um cliente.
-- Solicita encerramento de sessões TCP após completar requests assíncronos de foto/vídeo; mantém dois streams e limita fotos adicionais com 503.
-- Reduz captura/envio para 2 imagens/s, mantendo resolução/qualidade. Adiciona diagnóstico de clientes de foto, recusas e memória livre.
-- Documenta configuração direta /snapshot no Home Assistant e validação da coleta durante vídeo. 69 testes passaram; sem compilação nem confirmação física da correção.
-
-
-## 1.19.0 — 2026-10-22
-
-- Adiciona vídeo MJPEG em servidor separado, normalmente TCP81, com porta alternativa sem interferir no Prometheus salvo e até dois espectadores assíncronos.
-- Aumenta o limite de JPEG para 5 imagens/s e atualiza a página /camera para vídeo com pausa, reconexão e foto JPEG.
-- Adiciona camera_oled: quadro monocromático 128×64 com dithering, recorte central e exibição por 10 s; botão físico/tela:next sai antes.
-- Inclui atalho web e botão MQTT Camera no OLED, métricas de streaming e instruções MJPEG para Home Assistant.
-- Mantém partições OTA/flash 16 MB. 69 testes passaram; sem compilação ou teste físico do novo streaming/OLED.
-
-
-## 1.18.1 — 2026-10-22
-
-- Corrige a distribuição de flash para o firmware com câmera: partitions.csv para 16 MB, com dois aplicativos de 6,25 MiB e OTA preservado.
-- Mantém endereços de NVS/otadata, reserva SPIFFS e coredump e documenta migração por USB e opções Flash Size 16MB / Partition Scheme Custom.
-- Adiciona cinco testes de alinhamento, limites e capacidade da tabela; 65 testes passaram no total. Sem recompilação ou gravação.
-
-
-## 1.18.0 — 2026-10-22
-
-- Integra OV5647 MIPI-CSI por ESP_Video, reutilizando a Wire do OLED/codec e preservando GPIO27/áudio.
-- Captura em tarefa core 0, JPEG por hardware e cache protegido; inicialização automática com limpeza em falha.
-- Página /camera, imagem /camera.jpg e API/comando camera_status; visualização a cada segundo, pausa e aviso de imagem desatualizada.
-- Adiciona métricas de inicialização, disponibilidade, JPEGs, erros e idade; bloqueia snapshots e pausa worker durante OTA.
-- 60 testes da interface passaram; sem compilação nem validação física da câmera.
-
-
-## 1.17.0 — 2026-10-21
-
-- Adiciona motor local com quatro regras: CPU quente, heap baixo, rede indisponível e erros UDP em janela de 60 s.
-- Página /edge e API de configuração/estado, limites e tempos salvos em Preferences com verificação.
-- Confirmação de ativação/recuperação, histerese, intervalo mínimo entre alertas e pausa durante OTA.
-- Notificações Serial/SD, som opcional e histórico circular de 16 eventos em RAM; regras iniciam desativadas.
-- Comando edge_status, métricas Prometheus e alerta local com descoberta MQTT no Home Assistant.
-- 53 testes da interface passaram; sem compilação ou validação física do motor C++.
-
-
-## 1.16.0 — 2026-10-21
-
-- Adiciona cliente ESP-MQTT TCP assíncrono, configuração web /mqtt e API /api/mqtt/config, preferências verificadas e preservação/remoção explícita de senha.
-- Integra Home Assistant com descoberta por ID único, oito sensores, estado SD, LED, cinco botões de controle e evento do GPIO27.
-- Adiciona Last Will, reconexão, publicação em 30 s, estado desconhecido para dados inválidos, fila limitada e lista restrita de comandos sem retain.
-- mqtt_status e contadores MQTT reais no Prometheus. Interface e Prometheus mantêm portas anteriores.
-- 44 testes da interface passaram; firmware não compilado nem gravado.
-
-
-## 2026-10-21 — Formato parseável do help
-
-- Padronizada a resposta de `help` como `COMANDOS` seguido de um comando por
-  linha, incluindo aliases como itens individuais.
-- Atualizados o guia local e o catálogo geral.
-
-## 1.15.1 — 2026-10-19
-
-- Adiciona esp_udp_listener_up, esp_udp_packets_received_total, esp_udp_replies_sent_total e esp_udp_send_errors_total ao Prometheus.
-- Confere resultado das três aberturas do listener, escrita completa e conclusão dos envios.
-- Conta datagramas antes da validação e seleciona o canal UDP também para respostas a comandos grandes demais.
-- Documenta semântica e reinício dos contadores; não altera as preferências nem a porta web.
-
-
-## 1.15.0 — 2026-10-19
-
-- Integra Open-Meteo de Porto Alegre, seguindo coordenadas e cadência do M5NanoC6.
-- Publica temperatura e umidade externas, origem/local, idade, último HTTP e sucesso da consulta no Prometheus.
-- Consulta HTTPS em tarefa própria no core 0, com cache, limite de resposta e expiração; falhas preservam somente dados ainda válidos.
-- Adiciona weather_status e atalho Clima externo no terminal web. Documenta ArduinoJson 7.x e a consulta Grafana com instance/job.
-- Firmware não compilado nem gravado, conforme solicitado.
-
-## 2026-10-31 — Reset dos contadores NVS
-
-- Adicionado `reset_counters` ao UDP, Serial e terminal web. Zera somente os
-  contadores boot/reboot/watchdog no namespace `prometheus`, preservando as
-  preferências de coleta.
-- O terminal web pede confirmação antes de executar o comando.
-- Atualizados a ajuda, o guia local e o catálogo consolidado.
-
-## 1.14.1 — 2026-10-19
-
-- Review the ESP32-P4-Module-DEV-KIT schematic and pinout PDFs; confirm existing ES8311/NS4150B pins without changing them.
-- Reset the codec, verify format/DAC register readback, and clear mute while preserving other bits.
-- Match the board example's stereo I2S framing with identical samples in both slots.
-- Send about 100 ms of silence after enabling the amplifier, before each tone, and drain silence at the end.
-- Complete partial I2S writes with bounded waits; retain the ability to retry after a playback timeout.
-- Add audio_test (500 ms / 880 Hz), a web shortcut, and extended audio_status counters/registers.
-- Update all five Markdown guides. All 35 interface tests pass.
-- Root cause and audible playback remain unconfirmed on hardware; no compilation or flashing performed by the assistant.
-
-
-## Revisão documental — 2026-10-19
-
-- Conferidos os cinco Markdown do projeto com o estado 1.14.0, sem alterar código ou versão.
-- Alinhados botão GPIO27/GND, protetor de robôs, áudio ES8311 e comandos de diagnóstico.
-- Atualizadas a descrição das tarefas e a contagem vigente de 34 testes de interface já executados.
-- Acrescentados exemplos de verificação e referências entre os guias; distinguidas as notas históricas do comportamento atual.
-- Nenhuma compilação, gravação ou teste físico novo nesta revisão.
-
-## 1.14.0 — 2026-10-19
-
-- Move the external navigation button to GPIO27/GND with pull-up and 50 ms debounce.
-- Wake and advance once on press; remove the long-press Wi-Fi erase action.
-- Restore a full-screen 128×64 animated robot screensaver after 60 s of user inactivity, without OLED sleep.
-- Keep background logs and web/Prometheus polling from waking or resetting the saver; give OTA progress priority.
-- Add protetor:on/off/auto/status/tempo commands and a robot web shortcut.
-- Play an asynchronous 80 ms navigation tone through ES8311 at 0x18, I2S 13/12/10/9, amplifier GPIO53.
-- Share the OLED I2C bus, keep I2C out of the audio worker, and add audio_status diagnostics.
-- Update current button/OLED/audio guides and the GPIO metric pin. All 34 interface tests pass.
-- Firmware compilation and physical audio/wake/OTA checks remain with the user as requested.
-
-## 1.13.2
-
-- Export `esp_cpu_temperature_celsius` for CPU temperature panels in Grafana.
-- Share one checked sensor driver between the `temp` command and Prometheus.
-- Report NaN/unavailable on sensor failures and expose CPU temperature availability.
-- Document the Grafana query and Celsius unit; preserve all existing metrics and connection settings.
-- No firmware compilation or physical test in this revision, as requested by the user.
-
-## Revisão documental — 2026-10-18
-
-- Catálogo geral corrigido para o estado 1.13.1: `protetor:*` removido,
-  `sd_list` somente na raiz e ausência de `sd_test`.
-- Diferenciados limite de entrada de 254 bytes, `led_blink` por duração,
-  padrão de métricas na porta 80 e namespace `prometheus`.
-- Preservado o histórico de OTA e as versões numeradas abaixo, sem criar
-  uma nova versão por causa da documentação.
-- [Histórico consolidado](../../ESP32_Documents/changelog.md).
-  Nenhuma compilação ou teste físico novo nesta revisão.
-
-## 1.13.1
-
-- Align the connection pattern with M5NanoC6: collector host, exporter port and scrape interval saved in Preferences.
-- Keep the web and configuration API on port 80; allow metrics to share port 80 or use a separate port.
-- Apply exporter port changes about one second after saving, without reboot or redirect.
-- Add GET/POST /api/prometheus/config and downloadable /prometheus.yml with the configured interval.
-- Remove the separate server-port field and enable switch; preserve legacy host/port and default the interval to 15 seconds.
-- Keep all existing metrics, including SD; retain the P4 OTA reservation on TCP port 3232.
-- Validate preference loading, port sharing, interval limits and device-target links in 32 passing interface tests.
-- Update all project Markdown guides. Compilation is left to the user as requested; hardware tests remain pending.
+Firmware history for the ESP32-P4 Radar & Network Monitor. Version numbers refer to the firmware source. Historical behavior may differ from the current [setup guide](LEIA-ME.md).
 
 ## Unreleased
 
-- Incluído `name` na linha `help` para identificar o dispositivo como `ESP32P4`;
-  corrigido o separador para não unir `name` a `ota_password`.
-- Use the fixed default OTA password `123456` for Arduino IDE and browser uploads (`admin`).
-- Remove per-device OTA password generation and Preferences access; old stored passwords are ignored.
-- Keep authentication enabled; restrict use of this weak default password to trusted networks.
+- Rewrite the GitHub README and English reference guides around the current firmware, including the radar CSV workflow.
+- Reconcile installation, pin mappings, command examples, and telemetry references. Documentation only; the firmware version is unchanged.
 
-## 1.13.0
+## v1.25.3
 
-- Add a separate, configurable HTTP Prometheus exporter at `/metrics`; keep the device web UI on port 80.
-- Add `/prometheus` settings and protected `/api/prometheus` POST, with browser/server validation and verified Preferences storage.
-- Store collector hostname/IPv4 and server port as navigation references for pull collection; show a target and `prometheus.yml` example.
-- Apply exporter port/enabled changes without restarting; reserve device web, OTA and command ports.
-- Export requested identity, boot/reset, Wi-Fi, CPU, tasks, heap/PSRAM, flash, existing GPIO and HTTP application metrics.
-- Persist boot/reboot/watchdog counts; count Wi-Fi disconnect events safely across tasks.
-- Expose unavailable energy/environment/relay/analog/MQTT readings as NaN with availability indicators.
-- Cache SD filesystem/card capacity, usage and log size every 30 seconds; count logger/crash archive successes and failures.
-- Add six Prometheus form behavior tests; all 28 interface tests pass.
-- Update every project Markdown guide and add `PROMETHEUS.md` with complete metric definitions and collection setup.
-- Hardware collection, power-loss persistence and SD removal tests remain pending.
+- Add `radar_log:on`, `radar_log:off`, and `radar_log:status` for SD-backed CSV sessions.
+- Record servo commands, measurement angles, accepted and rejected distance batches, and target state.
+- Add `/radar.csv` for downloading the latest stopped session. Limit recording to 120 seconds.
 
-## 1.12.0
+## v1.25.2
 
-- Add `crash_info` with the central's read/archive/verify/erase workflow.
-- Adapt diagnostics to ESP32-P4 RISC-V registers and SDK stack dump; retain ELF identifiers.
-- Verify the SD report byte for byte before erasing the internal crash record.
-- Preserve the internal record when SD archival or verification fails.
-- Split UDP reports into packets of at most 1200 bytes for the central receiver.
-- Remove the OLED screensaver and its commands; keep the display on with eight-second page rotation.
-- Keep rotation active after advancing a page; replace the web wake shortcut with automatic pages.
-- Add crash command interface tests; all 22 browser simulation checks pass.
+- Complete a sweep before selecting the nearest confirmed echo and recheck it before locking.
+- Hold a stable central echo without continuous side-to-side motion; probe after roughly 850 ms without a compatible central echo.
 
-## 1.11.0
+## v1.25.1
 
-- Inventário geral de comandos alinhado com os recursos de diagnóstico, OTA,
-  proteção do OLED e cartão SD documentados no projeto.
-- Add `/logs` and a bounded `/api/logs` reader for `/log.txt` on the SD card.
-- Read at most the last 8 KB and select 25, 100 or 250 trailing lines.
-- Add manual/automatic refresh, local search, follow mode and explicit stale/error states.
-- Keep polling from writing new log entries or waking the OLED.
-- Add six log-page tests and a web wake test; all 20 browser simulation checks pass.
-- Add `botao_status` to diagnose the configured button pin and its electrical state.
-- Clarify onboard RST versus the external GPIO 2 user button; add a web wake shortcut.
+- Give target confirmation its own 1,200 ms window after the first valid batch.
+- Tolerate rejected batches during confirmation and hold the confirmed direction before probing.
 
-## 1.10.0
+## v1.25.0 — 2026-11-06
 
-- Add an automatic dim moving-clock screensaver after 60 seconds of inactivity.
-- Turn the OLED controller off after four further minutes, keeping device services running.
-- Wake on ordinary commands, display events or button presses; the first short press only wakes.
-- Keep transfer/OTA progress visible and preserve long-press Wi-Fi reset behavior.
-- Add `protetor` controls for activation, wake, automatic mode, timeout and status.
-- Keep display access on the application core and use rollover-safe inactivity timers.
+- Add the persistent eighth OLED page for sonar, with four range rings, a commanded sweep line, fading echoes, and a target marker.
+- Expose the page through `tela:7`, the web terminal, and MQTT discovery. Opening it does not start the servo.
 
-## 1.9.0
+## v1.24.0 — 2026-11-06
 
-- Receive serial commands on core 0 through a bounded eight-command queue.
-- Run web, UDP, OLED, SD and command execution in an explicit task on core 1.
-- Add `cores`, `ota_info` and serial-only `ota_password` diagnostics.
-- Add authenticated browser firmware uploads and Arduino IDE OTA.
-- Generate and verify a persistent per-device OTA password, disclosed only locally.
-- Validate upload size, inactive OTA partition, complete writes and final image.
-- Defer reboot until after success response and suspend commands during updating.
-- Add six browser upload checks, bringing the interface test suite to 13 checks.
+- Advance the radar by 5° per sonar measurement during search and associate samples with their commanded positions.
+- Add ultrasonic target confirmation, local probing, loss recovery, and tracking controls in Home Assistant and the web terminal.
 
-## 1.8.0
+## v1.23.0 — 2026-11-06
 
-- Add bounded serial command input at 115200 baud with LF, CR and CRLF support.
-- Route replies to the originating serial, UDP or HTTP channel.
-- Add the web terminal with quick actions, history and redacted Wi-Fi credentials.
-- Refresh dashboard cards every five seconds without replacing terminal input.
-- Add pause/resume, connection failure feedback and confirmation for web mutations.
-- Bound HTTP command responses to 8 KB and defer command-triggered reboots.
-- Avoid the default five-second clock wait when logging without NTP sync.
-- Add seven automated browser behavior checks; physical board tests remain required.
+- Add HC-SR04 support on GPIO3/GPIO4 with interrupt-based echo capture and a timeout.
+- Publish distance and acquisition angle through MQTT and Prometheus; report invalid readings as unavailable.
 
-## 1.7.0
+## v1.22.0 — 2026-11-06
 
-- Add circular Wi-Fi profile commands with verified persistence and redacted logs.
-- Add link, channel, PSRAM, chip, heap and clock diagnostics.
-- Add SD append and directory creation/removal.
-- Expand help and replace the command reference with a complete verified list.
-- Validate timezone and daylight-saving command arguments.
-- Preserve existing command names and aliases.
+- Extend servo travel to 5°–175° and add position, status, and control entities in Home Assistant.
 
+## v1.21.2 — 2026-11-06
 
-## 1.6.0
+- Raise the JPEG target to 5 fps and remove the extra MJPEG delay.
+- Synchronize the servo fallback sweep with newly transmitted frames when a viewer is connected.
 
-- Redesign local information and five-profile Wi-Fi pages for desktop and mobile.
-- Bundle styles/scripts locally; add connection badges and password visibility controls.
-- Keep stored passwords out of HTML and add explicit open-network selection.
-- Validate complete form submissions and verify credential persistence before reboot.
-- Attempt to restore prior profiles on write failure; report restoration errors.
-- Schedule restart after the HTTP success response without a blocking delay.
+## v1.21.1 — 2026-11-06
 
+- Expand the servo range to 20°–160°.
 
-## 1.5.1
+## v1.21.0 — 2026-11-06
 
-- Add RTT min/mean/max and sample age to network reports.
-- Show network telemetry in HTTP `/info`.
-- Make LED blinking and reset-button hold nonblocking.
-- Show the selected graph sample age on OLED.
-- Escape single quotes in SSID HTML attributes.
+- Add a positional servo on GPIO2 with PWM sweep, fixed angles, and web terminal shortcuts.
 
+## v1.20.6 — 2026-11-06
 
-## 1.5.0
+- Restore the idle screensaver on information pages, leaving the camera page persistent.
 
-- Add six OLED pages, automatic rotation and manual page commands.
-- Add per-interface asynchronous gateway ping, 24-result graphs, drop/offline
-  counters and four recent connection events.
-- Add `net_monitor`, `tela:0..5`, `tela:next` and `tela:auto`; update `help`.
-- Use GPIO 2 short press for navigation and five-second hold/release for Wi-Fi reset.
-- Defer network OLED events to the main loop.
-- Start Ethernet independently of Wi-Fi connection success; enable UDP in AP mode.
-- Load NTP configuration on every boot.
-- Reject oversized UDP commands and reserve buffer space for the terminator.
-- Preserve hardware pin definitions and existing command names and aliases.
+## v1.20.5 — 2026-11-06
+
+- Remove timed page rotation and retain button navigation.
+
+## v1.20.4 — 2026-11-06
+
+- Apply 180° orientation to JPEG snapshots and MJPEG as well as the OLED camera view.
+
+## v1.20.3 — 2026-11-06
+
+- Rotate the OLED camera view by 180°.
+
+## v1.20.2 — 2026-11-06
+
+- Add a dedicated persistent camera page with approximately one OLED frame per second.
+
+## v1.20.1 — 2026-10-25
+
+- Redesign the robot screensaver eyes with animated digital irises.
+
+## v1.20.0 — 2026-10-22
+
+- Add high-speed USB host for HID keyboards, mice, and one FAT flash drive, with a USB status page.
+- Add buffered system logging, bounded SD rotation, and USB and log metrics.
+
+## v1.19.1 — 2026-10-22
+
+- Improve service isolation and camera stability during streaming, and expand MQTT diagnostics.
+
+## v1.19.0 — 2026-10-22
+
+- Add multipart MJPEG streaming, Home Assistant video setup, and a camera image on the OLED.
+
+## v1.18.1 — 2026-10-22
+
+- Add the 16 MiB partition layout with two 6.25 MiB OTA application slots.
+
+## v1.18.0 — 2026-10-22
+
+- Add OV5647 MIPI-CSI capture and JPEG snapshots.
+
+## v1.17.0 — 2026-10-21
+
+- Add configurable local rules, alert history, MQTT events, and Prometheus alert metrics.
+
+## v1.16.0 — 2026-10-21
+
+- Add native ESP-MQTT and Home Assistant discovery.
+
+## v1.15.1 — 2026-10-19
+
+- Add UDP listener status and receive, reply, and error counters.
+
+## v1.15.0 — 2026-10-19
+
+- Add cached Open-Meteo observations for Porto Alegre.
+
+## v1.14.1 — 2026-10-19
+
+- Improve audio diagnostics and document the codec and amplifier wiring.
+
+## v1.14.0 — 2026-10-19
+
+- Add external GPIO27 navigation, robot screensaver, and audio feedback.
+
+## v1.13.2
+
+- Export on-chip CPU temperature and report sensor failures as unavailable.
+
+## v1.13.1
+
+- Align Prometheus configuration with the companion project. Persist the collector reference, exporter port, and interval; add a downloadable scrape example.
+
+## v1.13.0
+
+- Add Prometheus metrics for identity, uptime, Wi-Fi, CPU, memory, SD, GPIO, and application activity.
+
+## v1.12.0
+
+- Add `crash_info` to archive and verify crash reports on SD before clearing the internal record.
+- Adapt crash diagnostics to ESP32-P4 RISC-V registers and split large UDP replies.
+
+## v1.11.0
+
+- Add the bounded web log viewer and button diagnostics.
+
+## v1.10.0
+
+- Add idle OLED dimming, wake behavior, and screensaver controls.
+
+## v1.9.0
+
+- Split serial reception and application processing across cores.
+- Add browser and Arduino IDE OTA with image and partition checks. Later firmware replaced the original per-device OTA password with a fixed credential.
+
+## v1.8.0
+
+- Add serial commands at 115200 baud, a web terminal, and live dashboard updates.
+
+## v1.7.0
+
+- Add Wi-Fi profile commands, more hardware diagnostics, SD append and directory commands, and timezone validation.
+
+## v1.6.0
+
+- Redesign the dashboard and five-profile Wi-Fi setup for desktop and mobile.
+
+## v1.5.1
+
+- Add gateway RTT statistics, sample age, and nonblocking LED and button handling.
+
+## v1.5.0
+
+- Add six OLED information pages, per-interface gateway ping, connection history, and manual page commands.
+- Start Ethernet independently of Wi-Fi and bound oversized UDP input.
+
+## Other historical changes
+
+- Make the `help` command list machine-readable and add `name` for device identification.
+- Add `reset_counters` for persisted diagnostics counters.
+- Record board-level pin assignments and reconcile earlier command and OTA documentation.
