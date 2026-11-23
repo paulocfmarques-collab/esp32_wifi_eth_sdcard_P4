@@ -7,6 +7,20 @@ Firmware history for the ESP32-P4 Radar & Network Monitor. Version numbers refer
 - Rewrite the GitHub README and English reference guides around the current firmware, including the radar CSV workflow.
 - Reconcile installation, pin mappings, command examples, and telemetry references. Documentation only; the firmware version is unchanged.
 
+## v1.27.0 — 2026-11-23
+
+- Target Arduino ESP32 4.0.0 / ESP-IDF 6.1.1. Replace the ESP-MQTT dependency missing from the installed P4 package with bundled official ArduinoMqttClient 0.1.8 sources.
+- Run connection, subscription, publication, and keepalive operations in a dedicated core-0 worker. Keep command execution and hardware access on the application task; bound publication storage and retry connections.
+- Preserve MQTT settings, topic prefixes, entity IDs, QoS 1 publications, retained discovery/state, last will, and rejection of retained control messages. Discard stale queued data when changing broker configuration.
+- Update crash diagnostics for ESP-IDF 6, where the old ELF-format configuration symbol is absent. Check video, audio, USB host, and sensor API declarations against the installed package.
+- Document the upgrade and third-party license. No firmware build, flash, or physical validation has been performed for this migration.
+## v1.26.0 — 2026-11-23
+
+- Remove ultrasonic target acquisition, following, and lateral probing.
+- Sweep continuously through 5°–175° at 5° per 400 ms, independently of distance results or video frame delivery. Preserve fixed positioning, OTA pause, sensor filtering, sonar display, and CSV recording.
+- Remove tracking controls from the portal and clear retired Home Assistant discovery entries without changing other action IDs.
+- Keep legacy target telemetry and CSV fields as unavailable/false for compatibility.
+- Refresh the English documentation. Firmware compilation and physical validation are left to the user.
 ## v1.25.3
 
 - Add `radar_log:on`, `radar_log:off`, and `radar_log:status` for SD-backed CSV sessions.

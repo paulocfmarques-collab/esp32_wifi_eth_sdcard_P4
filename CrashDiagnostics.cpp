@@ -14,7 +14,8 @@ void endereco(String& out, uint32_t value)
 String CrashDiagnostics::lerArquivarEApagar(StorageManager& storage, const char* motivoReset)
 {
     String resultado = "Ultimo reset: " + String(motivoReset) + "\n";
-#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    // ESP-IDF 6 uses ELF dumps without the former DATA_FORMAT_ELF config symbol.
     esp_err_t erro = esp_core_dump_image_check();
     if (erro != ESP_OK)
         return resultado + "Sem core dump valido: " + esp_err_to_name(erro) + "\n";

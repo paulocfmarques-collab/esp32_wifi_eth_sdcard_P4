@@ -82,18 +82,9 @@ test('radar shortcuts send start, stop and status through the command endpoint',
   }
 });
 
-test('tracking shortcuts enable and disable following through the command endpoint', async () => {
-  for (const command of ['servo:rastrear:on', 'servo:rastrear:off']) {
-    const b = browser();
-    b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command } }) } });
-    await new Promise(resolve => setImmediate(resolve));
-    const request = b.requests.find(r => r.url === '/api/command');
-    assert.equal(request.options.body.get('cmd'), command);
-    assert.equal(request.options.headers['X-ESP32-Command'], '1');
-    assert.ok(source.includes("data-command='" + command + "'"));
-  }
+test('retired tracking buttons are absent from the web terminal', () => {
+  assert.ok(!source.includes("data-command='servo:rastrear:"));
 });
-
 test('sonar screen shortcut selects the sticky eighth OLED page', async () => {
   const b = browser();
   b.nodes.get('quick-commands').onclick({ target: { closest: () => ({ dataset: { command: 'tela:7' } }) } });

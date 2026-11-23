@@ -1,6 +1,6 @@
 # HC-SR04 ultrasonic sensor
 
-Firmware: **v1.25.3**. Use this guide for the conventional 5 V HC-SR04. Check the labels on your module before wiring.
+Firmware: **v1.27.0**. Use this guide for the conventional 5 V HC-SR04. Check the labels on your module before wiring.
 
 ## Wiring
 

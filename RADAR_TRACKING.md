@@ -1,18 +1,19 @@
-# Radar tracking and diagnostic recording
+# Continuous radar sweep and diagnostic recording
 
-Firmware: **v1.25.3**. The servo is off and tracking is disabled at boot. The system points a camera using an ultrasonic echo in one axis; it has no visual identification, physical angle feedback, or optical autofocus.
+Firmware: **v1.27.0**. Target tracking has been removed. The servo stays off at boot.
 
-## Search and follow
+## Monitor the environment
 
 1. Verify the [HC-SR04 wiring and fixed-angle readings](HC_SR04.md).
 2. Run `servo:on` to sweep the nominal **5°–175°** arc.
-3. Run `servo:rastrear:on` to enable target selection. Leave it off to sweep without locking.
+3. Open `tela:7` for the persistent sonar display.
+4. Run `servo:off` to stop, or `servo:angulo:90` for a fixed position.
 
-With sonar enabled, search advances **5°** per completed batch or after a **600 ms** wait without a candidate. In tracking mode, a candidate from **10–200 cm** is held for up to **1,200 ms** after the first valid batch. A second batch must be within **25 cm** of the first. The radar completes an endpoint-to-endpoint search, selects the nearest confirmed echo collected during the search, and checks it again before locking.
+The sweep advances **5° every 400 ms**, about **13.6 seconds per endpoint-to-endpoint pass** (27.2 seconds out and back) before application delays. It reverses only at the limits. A busy ultrasonic echo can briefly delay a step until completion or the sensor timeout; no valid echo is required to continue. There is no dependency on camera frames, target confirmation, or distance values, and no burst of catch-up steps after a delay. Manual positioning remains 1° per 20 ms. OTA pauses PWM and the sweep resumes without catching up.
 
-Once locked, a compatible central echo keeps the camera pointed at the target. When the central echo is lost for about **850 ms**, the servo probes to either side, initially by **±6°**, expanding to **±12°** after a missed cycle. After three missed cycles or 2.5 seconds without confirmation, it returns to searching. A nearby wall or other stable reflector can be selected instead of a person.
+The interval leaves room for the HC-SR04's existing stabilization and three-echo batch. Distance data remain filtered, published and displayed, but do not decide servo direction. This is environmental scanning, not person tracking or physical angle feedback.
 
-Without sonar, sweep pacing falls back to at most 2° per camera frame with a 200 ms minimum interval. `servo:angulo:90` takes manual control; `servo:off` removes PWM. `servo:status` reports the operating mode, timing, and target. The OLED page is `tela:7`. MQTT exposes tracking controls and the target indicator; Prometheus exposes tracking enabled, lock state, angle, and distance.
+The retired servo:rastrear commands cannot enable tracking. Their web controls are removed, and MQTT discovery clears the old tracking buttons and target indicator while preserving other entity IDs. Legacy telemetry fields report false/null; legacy Prometheus tracking flags remain zero and target measurements remain NaN. CSV target columns are retained for compatibility and stay empty.
 
 ## Record a CSV session
 
@@ -28,7 +29,7 @@ Start the session, reproduce the behavior, then stop it. The session stops autom
 | --- | --- |
 | `uptime_ms`, `event` | Device uptime at capture; position or measurement row |
 | `servo_angle_deg`, `servo_mode`, `servo_command_ms` | Current commanded servo state |
-| `target_angle_deg`, `target_cm` | Locked target, when available |
+| `target_angle_deg`, `target_cm` | Legacy columns; empty after target tracking removal |
 | `sequence`, `measurement_ms`, `measurement_angle_deg` | Batch identity and the angle associated with that measurement |
 | `batch_cm`, `distance_cm` | Batch estimate before jump rejection and the accepted distance |
 | `valid`, `error`, `rejected_jumps` | Acceptance, rejection reason, and cumulative jump count |

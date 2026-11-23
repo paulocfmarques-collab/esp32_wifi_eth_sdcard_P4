@@ -501,7 +501,6 @@ void SlaveCommandHandler::executarInterno(String cmd)
             "camera_status\n"
             "camera_oled\n"
             "servo:on|off|status|angulo:5..175\n"
-            "servo:rastrear:on|off\n"
             "radar_log:on|off|status\n"
             "ultrasonic:on|off|status\n"
             "usb_status\nusb_list\nusb_rescan\nlog_status\n"

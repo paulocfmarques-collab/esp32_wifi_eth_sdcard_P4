@@ -2,10 +2,11 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WebServer.h>
-#include <mqtt_client.h>
+#include "src/ArduinoMqttClient/MqttClient.h"
 #include <atomic>
 #include "StorageManager.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 
 class MqttService {
 public:
@@ -24,8 +25,23 @@ public:
 private:
     struct Config { bool enabled = false; String host, user, password; uint16_t port = 1883; } _config;
     struct Command { char text[32]; };
-    esp_mqtt_client_handle_t _client = nullptr;
+    struct Connection {
+        bool enabled = false;
+        char host[254]{}, user[129]{}, password[129]{};
+        uint16_t port = 1883;
+        uint32_t generation = 0;
+    };
+    struct Publication {
+        char topic[160]{}, payload[2048]{};
+        bool retain = false;
+        uint32_t generation = 0;
+    };
+    MqttClient* _client = nullptr; // Worker-only pointer, including receive callbacks.
+    TaskHandle_t _worker = nullptr;
     QueueHandle_t _commands = nullptr;
+    QueueHandle_t _connections = nullptr, _publications = nullptr;
+    std::atomic<uint32_t> _generation{0};
+    uint32_t _workerGeneration = 0;
     String _id, _base;
     std::atomic<bool> _connected{false}, _announce{false};
     std::atomic<uint32_t> _sent{0}, _received{0}, _errors{0};
@@ -37,9 +53,9 @@ private:
     bool _pending = false;
     size_t _discoveryIndex = 0;
     bool _discovering = false;
-    static void event(void*, esp_event_base_t, int32_t, void*);
+    static void run(void*);
+    static void message(int size);
     void start();
-    void stop();
     bool publish(const String& topic, const String& payload, bool retain = true);
     bool discovery(size_t index);
     void state(StorageManager& storage);

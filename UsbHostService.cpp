@@ -102,7 +102,7 @@ void UsbHostService::run(void* context) {
     }
 #else
     self._state = 3; ++self._errors;
-    systemLog.record("USB", "pacote sem TinyUSB host/HID/MSC; use Arduino ESP32 3.3.12 configurado para P4");
+    systemLog.record("USB", "pacote sem TinyUSB host/HID/MSC; confira Arduino ESP32 4.0.0 e a configuracao P4");
     vTaskDelete(nullptr);
 #endif
 }

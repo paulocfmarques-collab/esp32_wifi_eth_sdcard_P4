@@ -1,6 +1,6 @@
 # Command reference
 
-Firmware: **v1.25.3**. Use serial at **115200 baud**, UDP port **4210**, or the terminal at `/info`. Send one command per line. The command input limit is 254 bytes; the web response is capped at 8 KiB. MQTT accepts only selected actions. Send `help` for the running firmware's list.
+Firmware: **v1.27.0**. Use serial at **115200 baud**, UDP port **4210**, or the terminal at `/info`. Send one command per line. The command input limit is 254 bytes; the web response is capped at 8 KiB. MQTT accepts only selected actions. Send `help` for the running firmware's list.
 
 Command tokens are shown exactly as implemented, including Portuguese names. Replace placeholders before sending a command.
 
@@ -10,8 +10,7 @@ Command tokens are shown exactly as implemented, including Portuguese names. Rep
 | --- | --- |
 | `servo:on` / `servo:off` | Start sweeping / remove servo pulses |
 | `servo:angulo:90` | Move to a fixed angle; accepts 5–175 |
-| `servo:rastrear:on` / `servo:rastrear:off` | Enable / disable echo tracking |
-| `servo:status` | Show commanded angle, mode, target, and timing |
+| `servo:status` | Show commanded angle, mode and sweep timing |
 | `ultrasonic:on` / `ultrasonic:off` / `ultrasonic:status` | Enable, disable, or inspect measurements |
 | `radar_log:on` / `radar_log:off` / `radar_log:status` | Start, stop, or inspect an SD CSV session |
 | `camera_status` | Show camera readiness, frame age, video port, and client counts |
@@ -22,7 +21,7 @@ Command tokens are shown exactly as implemented, including Portuguese names. Rep
 | `protetor:on`, `off`, `auto`, `status`, `tempo:SECONDS` | Control the robot screensaver; prefix each argument with `protetor:` |
 | `audio_status` / `audio_test` | Inspect audio or play a test tone |
 
-[Tracking details and CSV download](RADAR_TRACKING.md) · [Sonar display](SONAR_OLED.md)
+[Sweep details and CSV download](RADAR_TRACKING.md) · [Sonar display](SONAR_OLED.md)
 
 ## Device, network, and maintenance
 

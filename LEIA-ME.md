@@ -1,11 +1,11 @@
 # Setup and operations
 
-Current firmware source: **v1.25.3**. Start with the [project overview](README.md) and [hardware guide](MAPA_PINOS_E_ESQUEMA.md).
+Current firmware source: **v1.27.0**. Start with the [project overview](README.md) and [hardware guide](MAPA_PINOS_E_ESQUEMA.md).
 
 ## Build and flash
 
-- Use the Waveshare ESP32-P4-Module-DEV-KIT target configuration and Arduino ESP32 **3.3.12**. Install Adafruit SSD1306, Adafruit GFX, and ArduinoJson 7. The Arduino core supplies the networking, SD, ESP-MQTT, video and USB host components used by the sketch.
-- Open `wifi_Eth_SDCard.ino` in its folder with all source files and `partitions.csv`. Select **16 MB Flash Size** and **Custom Partition Scheme**. The two application slots are **6,553,600 bytes (6.25 MiB) each**. PSRAM does not increase that limit.
+- Use the Waveshare ESP32-P4-Module-DEV-KIT target configuration and Arduino ESP32 **4.0.0**. Install Adafruit SSD1306, Adafruit GFX, and ArduinoJson 7. The Arduino core supplies networking, SD, video, and USB host components. MQTT uses bundled ArduinoMqttClient 0.1.8 over NetworkClient; keep the entire src/ directory with the sketch. No external MQTT library installation is needed.
+- Open `wifi_Eth_SDCard.ino` in its folder with all source files and `partitions.csv`. Select **16 MB Flash Size** and **Custom Partition Scheme**, and **PSRAM Enabled**. The two application slots are **6,553,600 bytes (6.25 MiB) each**. PSRAM does not increase that limit.
 - Install over USB when the device does not already have the matching layout. An OTA application upload does not change the partition table.
 
 ## First boot
@@ -45,3 +45,5 @@ Keep the device on a trusted network. The firmware uses a fixed OTA credential a
 | Metrics cannot be scraped | Verify the device IP and exporter port in [Prometheus setup](PROMETHEUS.md). |
 | USB media does not appear | Check jumper routing, USB mode and filesystem; use `usb_status` and `usb_rescan`. |
 | OLED sonar page is missing | On v1.25.0 or newer, send `tela:7`. See [the OLED guide](SONAR_OLED.md). |
+
+See [Arduino ESP32 4.0 migration](ARDUINO_4_MIGRATION.md) for backend changes, verification limits, and post-upload checks.

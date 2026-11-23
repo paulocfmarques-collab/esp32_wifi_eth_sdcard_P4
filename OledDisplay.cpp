@@ -272,7 +272,7 @@ void OledDisplay::desenharSonar(uint32_t now)
     _display.setTextColor(SSD1306_WHITE);
     _display.setCursor(0, 0); _display.print("SONAR 4m");
     _display.setCursor(56, 0);
-    _display.print(radarServo.targetLocked() ? "ALVO" : radarServo.enabled() ? "BUSCA" : "PARADO");
+    _display.print(radarServo.enabled() ? "RADAR" : "PARADO");
     _display.setCursor(110, 0); _display.print("8/8");
     const int cx = 64, cy = 54, radius = 43;
     auto px = [&](int angle, int r) { return cx - int(lroundf(cosf(angle * 0.01745329252f) * r)); };
@@ -298,10 +298,6 @@ void OledDisplay::desenharSonar(uint32_t now)
     }
     if (radarServo.enabled())
         _display.drawLine(cx, cy, px(radarServo.angle(), radius), py(radarServo.angle(), radius), SSD1306_WHITE);
-    if (radarServo.targetLocked() && isfinite(radarServo.trackedDistance())) {
-        const int r = constrain(int(radarServo.trackedDistance() * radius / 400), 0, radius);
-        _display.drawCircle(px(radarServo.trackedAngle(), r), py(radarServo.trackedAngle(), r), 3, SSD1306_WHITE);
-    }
     const auto sample = ultrasonic.snapshot();
     _display.setCursor(0, 56); _display.printf("A:%3d", radarServo.angle());
     _display.setCursor(40, 56);

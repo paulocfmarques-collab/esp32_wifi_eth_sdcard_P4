@@ -25,11 +25,8 @@ constexpr int SERVO_MIN_ANGLE = 5;
 constexpr int SERVO_MAX_ANGLE = 175;
 constexpr uint32_t SERVO_STEP_MS = 20;
 constexpr uint32_t CAMERA_FRAME_INTERVAL_MS = 200; // Target 5 JPEG frames/second.
-constexpr int SERVO_SWEEP_STEP_DEGREES = 2; // At most 2 degrees per new video frame.
-constexpr int RADAR_SEARCH_STEP_DEGREES = 5; // With sonar, advance after each completed measurement.
-constexpr int RADAR_PROBE_DEGREES = 6;
-constexpr float RADAR_TARGET_MIN_CM = 10.0f;
-constexpr float RADAR_TARGET_MAX_CM = 200.0f;
+constexpr int SERVO_SWEEP_STEP_DEGREES = 5;
+constexpr uint32_t RADAR_SWEEP_INTERVAL_MS = 400; // About 13.6 seconds across the 170-degree arc.
 #define AUDIO_CODEC_ADDRESS 0x18
 #define AUDIO_MCLK 13
 #define AUDIO_BCLK 12

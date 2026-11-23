@@ -1,6 +1,6 @@
 # Hardware and pin map
 
-Reference: Waveshare ESP32-P4-Module-DEV-KIT, Arduino ESP32 3.3.12, firmware v1.25.3. **GPIO numbers are not physical P6 pin numbers.** Confirm the board revision and pin-1 marking before wiring.
+Reference: Waveshare ESP32-P4-Module-DEV-KIT, Arduino ESP32 4.0.0, firmware v1.27.0. **GPIO numbers are not physical P6 pin numbers.** Confirm the board revision and pin-1 marking before wiring.
 
 ## External wiring
 

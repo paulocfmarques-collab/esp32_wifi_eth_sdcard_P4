@@ -1,6 +1,6 @@
 # Prometheus and Grafana
 
-Firmware: **v1.25.3**. The device exposes a pull exporter; Prometheus connects to the ESP32-P4.
+Firmware: **v1.27.0**. The device exposes a pull exporter; Prometheus connects to the ESP32-P4.
 
 1. Open `/prometheus` on the device. Set the collector host reference, exporter port and scrape interval. Defaults are port **80** and interval **15 s**.
 2. Download `/prometheus.yml` or add the job below. Use the **device address** in `targets`; the collector host setting is not the scrape target.
@@ -30,7 +30,7 @@ The web portal stays on port 80. The exporter can share that port or use a separ
 | MQTT and edge rules | `mqtt_connected`, `mqtt_publish_errors`, `esp_edge_active_alerts`, `esp_edge_rule_active` |
 | Weather | `sensor_temperature_celsius`, `sensor_humidity_percent`, `esp_weather_data_age_seconds` |
 | Sonar | `ultrasonic_available`, `ultrasonic_distance_cm`, `ultrasonic_servo_angle_degrees`, `ultrasonic_samples_total`, `ultrasonic_errors_total`, `ultrasonic_sample_age_seconds` |
-| Radar tracking | `radar_tracking_enabled`, `radar_target_locked`, `radar_target_angle_degrees`, `radar_target_distance_cm` |
+| Legacy tracking fields | `radar_tracking_enabled`, `radar_target_locked`, `radar_target_angle_degrees`, `radar_target_distance_cm` |
 
 See [PrometheusMetrics.cpp](PrometheusMetrics.cpp) for the full metric definitions and labels. Availability is reported separately; an unavailable distance or angle can be `NaN`, not zero. Outdoor weather comes from Open-Meteo for Porto Alegre and is distinct from the on-chip temperature. Do not treat the commanded servo angle as physical feedback.
 
@@ -44,3 +44,5 @@ increase(ultrasonic_errors_total[5m])
 ```
 
 Use Celsius, centimeters, or degrees for the corresponding panels. Scrapes are snapshots; use [radar CSV recording](RADAR_TRACKING.md) for individual measurement batches and servo transitions.
+
+Target tracking was removed in v1.27.0. Compatibility metrics radar_tracking_enabled/radar_target_locked remain 0; target distance and angle remain NaN. They no longer represent active target selection.

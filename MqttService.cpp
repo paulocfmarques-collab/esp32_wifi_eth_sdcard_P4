@@ -13,6 +13,7 @@
 #include <Preferences.h>
 #include <esp_timer.h>
 #include <ctype.h>
+#include <NetworkClient.h>
 
 MqttService mqtt;
 namespace {
@@ -38,10 +39,10 @@ const Entity sensors[] = {
 };
 const char* actions[] = {"tela:next", "tela:auto", "protetor:on", "protetor:off", "audio_test", "camera_oled",
     "servo:on", "servo:off", "servo:angulo:90", "servo:status",
-    "ultrasonic:on", "ultrasonic:off", "ultrasonic:status", "servo:rastrear:on", "servo:rastrear:off", "tela:7"};
+    "ultrasonic:on", "ultrasonic:off", "ultrasonic:status", nullptr, nullptr, "tela:7"};
 const char* actionNames[] = {"Proxima tela", "Retomar tela", "Carinhas ligar", "Carinhas desligar", "Testar som", "Camera no OLED",
     "Iniciar radar", "Parar servo", "Centralizar servo", "Atualizar estado do servo",
-    "Ligar ultrassom", "Desligar ultrassom", "Atualizar ultrassom", "Habilitar acompanhamento", "Desabilitar acompanhamento", "Sonar no OLED"};
+    "Ligar ultrassom", "Desligar ultrassom", "Atualizar ultrassom", nullptr, nullptr, "Sonar no OLED"};
 constexpr size_t SENSOR_COUNT = sizeof(sensors) / sizeof(sensors[0]);
 constexpr size_t ACTION_COUNT = sizeof(actions) / sizeof(actions[0]);
 static_assert(ACTION_COUNT == sizeof(actionNames) / sizeof(actionNames[0]), "MQTT action names must match commands");
@@ -69,94 +70,148 @@ void MqttService::begin() {
         }
         prefs.end();
     }
-    if (!validHost(_config.host) || !_config.port) _config.enabled = false;
+    if (!validHost(_config.host) || !_config.port || _config.user.length() > 128 || _config.password.length() > 128)
+        _config.enabled = false;
+    _connections = xQueueCreate(1, sizeof(Connection));
+    _publications = xQueueCreate(7, sizeof(Publication)); // About 15.5 KiB, bounded.
+    if (!_commands || !_connections || !_publications ||
+        xTaskCreatePinnedToCore(run, "mqtt_io", 8192, this, 1, &_worker, 0) != pdPASS) {
+        _worker = nullptr; ++_errors; systemLog.record("MQTT", "falha ao criar tarefa/filas"); return;
+    }
+    start();
 }
 
 void MqttService::start() {
-    esp_mqtt_client_config_t config = {};
-    config.broker.address.hostname = _config.host.c_str();
-    config.broker.address.port = _config.port;
-    config.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
-    config.credentials.client_id = _id.c_str();
-    config.credentials.username = _config.user.isEmpty() ? nullptr : _config.user.c_str();
-    config.credentials.authentication.password = _config.password.isEmpty() ? nullptr : _config.password.c_str();
-    String availability = _base + "/availability";
-    config.session.last_will.topic = availability.c_str();
-    config.session.last_will.msg = "offline";
-    config.session.last_will.qos = 1; config.session.last_will.retain = 1;
-    config.session.keepalive = 30;
-    config.network.reconnect_timeout_ms = 10000;
-    config.network.timeout_ms = 5000;
-    config.buffer.size = 2048;
-    config.task.stack_size = 8192;
-    config.outbox.limit = 16384;
-    _client = esp_mqtt_client_init(&config);
-    if (!_client) { ++_errors; return; }
-    if (esp_mqtt_client_register_event(_client, MQTT_EVENT_ANY, event, this) != ESP_OK ||
-        esp_mqtt_client_start(_client) != ESP_OK) { ++_errors; stop(); }
-}
-
-void MqttService::stop() {
-    if (!_client) return;
-    // Configuration changes only; MQTT callbacks never touch hardware or stop the client.
-    if (_connected) esp_mqtt_client_publish(_client, (_base + "/availability").c_str(), "offline", 0, 1, 1);
-    esp_mqtt_client_stop(_client);
-    esp_mqtt_client_destroy(_client); _client = nullptr;
+    if (!_connections || !_worker) return;
+    Connection request;
+    request.enabled = _config.enabled;
+    _config.host.toCharArray(request.host, sizeof(request.host));
+    _config.user.toCharArray(request.user, sizeof(request.user));
+    _config.password.toCharArray(request.password, sizeof(request.password));
+    request.port = _config.port;
+    request.generation = ++_generation;
     _connected = false; _announce = false; _discovering = false;
     if (_commands) xQueueReset(_commands);
+    xQueueOverwrite(_connections, &request);
 }
 
-void MqttService::event(void* arg, esp_event_base_t, int32_t id, void* data) {
-    auto& self = *static_cast<MqttService*>(arg);
-    auto e = static_cast<esp_mqtt_event_handle_t>(data);
-    if (id == MQTT_EVENT_CONNECTED) {
-        systemLog.record("MQTT", "conectado ao broker");
-        self._connected = true; self._announce = true;
-        self._errorType = 0; self._brokerCode = 0; self._socketError = 0; self._transportError = 0;
-    }
-    else if (id == MQTT_EVENT_DISCONNECTED) { self._connected = false; ++self._disconnects; systemLog.record("MQTT", "desconectado; reconexao automatica"); }
-    else if (id == MQTT_EVENT_PUBLISHED) ++self._sent;
-    else if (id == MQTT_EVENT_ERROR) {
-        ++self._errors;
-        if (e->error_handle) {
-            const auto& error = *e->error_handle;
-            self._errorType = error.error_type;
-            self._brokerCode = error.error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED ? error.connect_return_code : 0;
-            self._socketError = error.error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT ? error.esp_transport_sock_errno : 0;
-            self._transportError = error.error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT ? error.esp_tls_last_esp_err : 0;
-            systemLog.record("MQTT", "erro tipo=%d broker=%d socket=%d transporte=%d", self._errorType.load(), self._brokerCode.load(), self._socketError.load(), self._transportError.load());
+void MqttService::run(void* context) {
+    auto& self = *static_cast<MqttService*>(context);
+    NetworkClient transport;
+    transport.setConnectionTimeout(5000);
+    MqttClient client(transport);
+    client.setConnectionTimeout(5000);
+    client.setKeepAliveInterval(30000);
+    client.setId(self._id);
+    client.onMessage(message);
+    self._client = &client;
+    Connection current;
+    uint32_t retryAt = 0;
+    Publication publication;
+    for (;;) {
+        Connection request;
+        if (xQueueReceive(self._connections, &request, 0) == pdTRUE) {
+            if (client.connected()) {
+                client.beginMessage(self._base + "/availability", (unsigned long)7, true, 1);
+                client.print("offline"); client.endMessage();
+            }
+            client.stop();
+            self._connected = false;
+            xQueueReset(self._publications);
+            current = request; self._workerGeneration = current.generation;
+            client.setUsernamePassword(current.user, current.password);
+            client.beginWill(self._base + "/availability", (unsigned short)7, true, 1);
+            client.print("offline"); client.endWill();
+            retryAt = millis();
         }
-    }
-    else if (id == MQTT_EVENT_DELETED) ++self._errors;
-    else if (id == MQTT_EVENT_DATA) {
-        if (e->current_data_offset == 0) ++self._received;
-        // Only complete, bounded messages are handled. Retained HA birth is safe; commands aren't.
-        if (e->current_data_offset || e->data_len != e->total_data_len ||
-            e->data_len <= 0 || e->data_len >= 32) return;
-        String topic; topic.concat(e->topic, e->topic_len);
-        String payload; payload.concat(e->data, e->data_len);
-        if (topic == "homeassistant/status") {
-            if (payload == "online") self._announce = true;
-            return;
+        if (!current.enabled || current.generation != self._generation.load()) {
+            vTaskDelay(pdMS_TO_TICKS(20)); continue;
         }
-        if (topic != self._base + "/command" || e->retain) return;
-        bool allowed = payload == "led_on" || payload == "led_off" || servoAngleCommand(payload);
-        for (auto action : actions) allowed = allowed || payload == action;
-        if (!allowed) return;
-        Command command = {};
-        payload.toCharArray(command.text, sizeof(command.text));
-        if (!self._commands || xQueueSend(self._commands, &command, 0) != pdTRUE) ++self._errors;
+        const bool network = WiFi.status() == WL_CONNECTED ||
+            (ETH.linkUp() && ETH.localIP() != IPAddress(0,0,0,0));
+        if (!network || !client.connected()) {
+            if (self._connected.exchange(false)) {
+                ++self._disconnects;
+                systemLog.record("MQTT", "desconectado; reconexao em 10s");
+                client.stop(); retryAt = millis() + 10000;
+            }
+            if (network && int32_t(millis() - retryAt) >= 0) {
+                retryAt = millis() + 10000;
+                if (!client.connect(current.host, current.port)) {
+                    const int error = client.connectError();
+                    self._errorType = error > 0 ? 2 : 1;
+                    self._brokerCode = error > 0 ? error : 0;
+                    self._transportError = error;
+                    ++self._errors;
+                    systemLog.record("MQTT", "conexao falhou codigo=%d", error);
+                    client.stop();
+                } else if (current.generation != self._generation.load()) {
+                    client.stop();
+                } else if (!client.subscribe(self._base + "/command", 0) ||
+                           !client.subscribe("homeassistant/status", 0)) {
+                    ++self._errors; client.stop();
+                } else {
+                    self._errorType = 0; self._brokerCode = 0;
+                    self._transportError = 0; self._socketError = 0;
+                    self._connected = true; self._announce = true;
+                    systemLog.record("MQTT", "conectado (ArduinoMqttClient)");
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(20)); continue;
+        }
+        client.poll();
+        if (current.generation == self._generation.load() && client.connected() &&
+            xQueueReceive(self._publications, &publication, 0) == pdTRUE) {
+            if (publication.generation == current.generation) {
+                const size_t size = strlen(publication.payload);
+                bool ok = client.beginMessage(publication.topic, (unsigned long)size, publication.retain, 1);
+                if (ok) ok = client.write(reinterpret_cast<const uint8_t*>(publication.payload), size) == size;
+                if (ok) ok = client.endMessage() == 1;
+                if (ok) ++self._sent;
+                else { ++self._errors; client.stop(); }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+void MqttService::message(int size) {
+    auto& self = mqtt;
+    auto& client = *self._client;
+    ++self._received;
+    if (size <= 0 || size >= 32 ||
+        self._workerGeneration != self._generation.load()) return;
+    const String topic = client.messageTopic();
+    const bool retained = client.messageRetain() == 1;
+    char buffer[32]{};
+    if (client.read(reinterpret_cast<uint8_t*>(buffer), size) != size) { ++self._errors; return; }
+    if (memchr(buffer, 0, size)) return; // Never execute a prefix of a binary command.
+    const String payload(buffer);
+    if (topic == "homeassistant/status") {
+        if (payload == "online") self._announce = true;
+        return;
+    }
+    if (topic != self._base + "/command" || retained) return;
+    bool allowed = payload == "led_on" || payload == "led_off" || servoAngleCommand(payload);
+    for (auto action : actions) if (action) allowed = allowed || payload == action;
+    if (!allowed) return;
+    Command command = {};
+    payload.toCharArray(command.text, sizeof(command.text));
+    if (xQueueSend(self._commands, &command, 0) != pdTRUE) ++self._errors;
 }
 
 bool MqttService::publish(const String& topic, const String& payload, bool retain) {
-    if (!_connected || !_client) return false;
-    if (esp_mqtt_client_enqueue(_client, topic.c_str(), payload.c_str(), payload.length(), 1, retain, true) < 0) {
+    if (!_connected || !_publications) return false;
+    Publication publication;
+    if (topic.length() >= sizeof(publication.topic) || payload.length() >= sizeof(publication.payload)) {
         ++_errors; return false;
     }
+    topic.toCharArray(publication.topic, sizeof(publication.topic));
+    payload.toCharArray(publication.payload, sizeof(publication.payload));
+    publication.retain = retain; publication.generation = _generation.load();
+    if (xQueueSend(_publications, &publication, 0) != pdTRUE) { ++_errors; return false; }
     return true;
 }
-
 bool MqttService::discovery(size_t index) {
     JsonDocument doc;
     String key, component = "sensor";
@@ -170,6 +225,8 @@ bool MqttService::discovery(size_t index) {
     } else if (index < SENSOR_COUNT + ACTION_COUNT) {
         size_t action = index - SENSOR_COUNT;
         key = "action_" + String(action); component = "button";
+        // Keep the existing action IDs, clearing only the retired tracking buttons.
+        if (!actions[action]) return publish("homeassistant/button/" + _id + "/" + key + "/config", "");
         doc["name"] = actionNames[action]; doc["command_topic"] = _base + "/command";
         doc["payload_press"] = actions[action];
     } else if (index == SENSOR_COUNT + ACTION_COUNT) {
@@ -220,13 +277,7 @@ bool MqttService::discovery(size_t index) {
         doc["expire_after"] = 10;
         doc["json_attributes_topic"] = _base + "/servo/state";
     } else if (index == SENSOR_COUNT + ACTION_COUNT + 8) {
-        key = "radar_target"; component = "binary_sensor";
-        doc["name"] = "Alvo no radar"; doc["device_class"] = "occupancy";
-        doc["state_topic"] = _base + "/servo/state";
-        doc["value_template"] = "{{ 'ON' if value_json.target_locked else 'OFF' }}";
-        doc["payload_on"] = "ON"; doc["payload_off"] = "OFF";
-        doc["json_attributes_topic"] = _base + "/servo/state";
-        doc["expire_after"] = 10;
+        return publish("homeassistant/binary_sensor/" + _id + "/radar_target/config", "");
     } else {
         return false;
     }
@@ -262,21 +313,15 @@ void MqttService::state(StorageManager& storage) {
 
 void MqttService::handle(StorageManager& storage, bool busy, void (*command)(String)) {
     if (busy) { if (_commands) xQueueReset(_commands); return; }
-    if (_pending && int32_t(millis() - _applyAt) >= 0) { stop(); _pending = false; }
+    if (_pending && int32_t(millis() - _applyAt) >= 0) { start(); _pending = false; }
     if (_pending) return;
-    bool network = WiFi.status() == WL_CONNECTED || (ETH.linkUp() && ETH.localIP() != IPAddress(0,0,0,0));
-    if (!_client && _config.enabled && network && int32_t(millis() - _applyAt) >= 0) {
-        start(); _applyAt = millis() + 10000;
-    }
     if (!_connected) { if (_commands) xQueueReset(_commands); return; }
     if (_announce.load() && int32_t(millis() - _announceAt) >= 0 && _announce.exchange(false)) {
-        if (esp_mqtt_client_subscribe(_client, (_base + "/command").c_str(), 0) < 0 ||
-            esp_mqtt_client_subscribe(_client, "homeassistant/status", 0) < 0) { ++_errors; _announce = true; }
         _announceAt = millis() + 5000;
         _discoveryIndex = 0; _discovering = true; _discoveryAt = millis();
         _publishAt = millis(); _servoPublishAt = millis();
     }
-    // Spread discovery across cycles and bound ESP-MQTT's outbox.
+    // Spread discovery across cycles; publication queue applies bounded backpressure.
     if (_discovering && int32_t(millis() - _discoveryAt) >= 0) {
         bool ok = discovery(_discoveryIndex);
         _discoveryAt = millis() + (ok ? 50 : 1000);
@@ -305,7 +350,8 @@ void MqttService::servoState() {
         doc["target_angle"] = radarServo.trackedAngle();
         doc["target_distance_cm"] = radarServo.trackedDistance();
     } else { doc["target_angle"] = nullptr; doc["target_distance_cm"] = nullptr; }
-    doc["search_step_degrees"] = RADAR_SEARCH_STEP_DEGREES;
+    doc["search_step_degrees"] = SERVO_SWEEP_STEP_DEGREES;
+    doc["sweep_interval_ms"] = RADAR_SWEEP_INTERVAL_MS;
     const auto sonar = ultrasonic.snapshot();
     doc["ultrasonic_available"] = sonar.available;
     if (sonar.available) doc["distance_cm"] = sonar.distanceCm; else doc["distance_cm"] = nullptr;
@@ -335,6 +381,8 @@ String MqttService::configuration() {
     doc["transport_error"] = _transportError.load();
     doc["heap_free"] = ESP.getFreeHeap();
     doc["network_up"] = WiFi.status() == WL_CONNECTED || (ETH.linkUp() && ETH.localIP() != IPAddress(0,0,0,0));
+    doc["backend"] = "ArduinoMqttClient 0.1.8";
+    doc["worker_ready"] = _worker != nullptr;
     return jsonText(doc);
 }
 String MqttService::status() { return configuration() + "\n"; }
@@ -371,7 +419,7 @@ void MqttService::save(WebServer& server) {
     if (!ok) { if (previous.isEmpty()) prefs.remove("config"); else prefs.putString("config", previous); }
     prefs.end();
     if (!ok) { server.send(503, "text/plain", "Falha ao salvar MQTT; confira a configuracao antes de reiniciar."); return; }
-    // Client copies credentials on init; stop the old connection before applying new credentials.
+    // The worker receives a bounded configuration snapshot; no network calls on the application task.
     _config = next; _pending = true; _applyAt = millis() + 1000;
     server.send(200, "application/json", configuration());
 }
