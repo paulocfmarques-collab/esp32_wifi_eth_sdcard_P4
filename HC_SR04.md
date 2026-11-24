@@ -1,6 +1,6 @@
 # HC-SR04 ultrasonic sensor
 
-Firmware: **v1.27.0**. Use this guide for the conventional 5 V HC-SR04. Check the labels on your module before wiring.
+Firmware: **v1.27.5**. Use this guide for the conventional 5 V HC-SR04. Check the labels on your module before wiring.
 
 ## Wiring
 
@@ -25,9 +25,9 @@ This divider produces about 3.0 V from a nominal 5 V echo. The documented 1 kΩ 
 
 ## Measurement pipeline
 
-The firmware sends a 12 µs trigger, captures ECHO edges by interrupt, and times out after 30 ms. Triggers are separated by at least 100 ms; sampling waits at least 100 ms after a servo command. Echo widths are converted to nominal centimeters by dividing microseconds by 58. Accepted raw distances are 2–400 cm.
+The firmware sends a 12 µs trigger, captures ECHO edges by interrupt, and times out after 30 ms. With the servo stationary, triggers are separated by at least 100 ms and sampling waits at least 100 ms after a position command. During the 200 ms sweep dwell, the interval is 70 ms and the settling wait is 50 ms. Echo widths are converted to nominal centimeters by dividing microseconds by 58. Accepted raw distances are 2–400 cm.
 
-Three attempts form a batch. At least two valid echoes must agree within the greater of 3 cm or 10% of the smaller distance. The closest agreeing pair is averaged. A jump from a recent confirmed value needs another compatible batch. Movement resets the batch and its distance history. The recorded angle comes from the PWM command, not physical position feedback.
+Three attempts form a stationary batch; two attempts form a sweeping batch. At least two valid echoes must agree within the greater of 3 cm or 10% of the smaller distance. The closest agreeing pair is averaged. A jump from a recent confirmed value needs another compatible batch. Movement resets the batch and its distance history. The recorded angle comes from the PWM command, not physical position feedback.
 
 ## Verify a reading
 

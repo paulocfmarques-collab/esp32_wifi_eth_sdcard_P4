@@ -1,6 +1,6 @@
 # Command reference
 
-Firmware: **v1.27.0**. Use serial at **115200 baud**, UDP port **4210**, or the terminal at `/info`. Send one command per line. The command input limit is 254 bytes; the web response is capped at 8 KiB. MQTT accepts only selected actions. Send `help` for the running firmware's list.
+Firmware: **v1.27.5**. Use serial at **115200 baud**, UDP port **4210**, or the terminal at `/info`. Send one command per line. The command input limit is 254 bytes; the web response is capped at 8 KiB. MQTT accepts only selected actions. Send `help` for the running firmware's list.
 
 Command tokens are shown exactly as implemented, including Portuguese names. Replace placeholders before sending a command.
 

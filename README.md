@@ -2,7 +2,7 @@
 
 **A camera, ultrasonic radar, and network diagnostics console on a single ESP32-P4 dev kit.**
 
-![Firmware v1.27.0](https://img.shields.io/badge/firmware-v1.27.0-2563eb)
+![Firmware v1.27.5](https://img.shields.io/badge/firmware-v1.27.5-2563eb)
 ![ESP32-P4](https://img.shields.io/badge/platform-ESP32--P4-0f766e)
 ![Arduino ESP32 4.0.0](https://img.shields.io/badge/Arduino_ESP32-4.0.0-008184)
 
@@ -36,11 +36,13 @@ servo:on
 servo:status
 ```
 
-`servo:on` starts the sweep. The sweep uses 5° steps every 400 ms (about 13.6 seconds per full 170° pass). The motor remains off until commanded on. The sonar page does not start the motor. Ultrasonic measurements do not select or follow targets; there is no physical angle feedback or optical focus control.
+`servo:on` starts the sweep. The sweep uses 5° steps every 200 ms (about 6.8 seconds per full 170° pass). The motor remains off until commanded on. The sonar page does not start the motor. Ultrasonic measurements do not select or follow targets; there is no physical angle feedback or optical focus control.
 
 To capture a problem, send `radar_log:on`, reproduce it, and send `radar_log:off`. Open `http://DEVICE_IP/radar.csv` to download the latest session. The CSV distinguishes the commanded servo angle from the angle associated with the distance sample. See [radar sweep and diagnostics](RADAR_TRACKING.md).
 
 ## Interfaces
+
+Arduino ESP32 4.0.0 builds require the included **CameraDmaFix** helper library for CSI DMA allocation. Install it once using `./tools/install-camera-dma-fix.ps1 -Sketchbook 'C:/Arduino'` (adjust your sketchbook path). See the [migration guide](ARDUINO_4_MIGRATION.md) for the driver diagnosis and validation steps.
 
 | Interface | Access |
 | --- | --- |
@@ -78,7 +80,7 @@ flowchart LR
 | [Radar sweep](RADAR_TRACKING.md) | Continuous sweep, timing, and CSV capture |
 | [OLED sonar](SONAR_OLED.md) | Navigation, display symbols, and validation |
 | [Prometheus](PROMETHEUS.md) | Scrape configuration, metric families, and example queries |
-| [Changelog](CHANGELOG.md) | Firmware history through v1.27.0 |
+| [Changelog](CHANGELOG.md) | Firmware history through v1.27.5 |
 
 ## Verification
 

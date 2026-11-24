@@ -42,6 +42,10 @@ private:
     std::atomic<uint32_t> _frames{0}, _errors{0}, _lastFrameMs{0};
     std::atomic<unsigned> _captureError{0};
     const char* _error = "nao inicializada";
+    const char* _initStage = "not_started";
+    int _initErrno = 0;
+    bool _dmaFixActive = false;
+    unsigned _dmaInternalAllocations = 0;
     httpd_handle_t _streamServer = nullptr;
     uint16_t _streamPort = 0;
     std::atomic<uint32_t> _streamClients{0}, _streamFrames{0}, _streamErrors{0};

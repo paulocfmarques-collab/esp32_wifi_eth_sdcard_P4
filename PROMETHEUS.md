@@ -1,6 +1,6 @@
 # Prometheus and Grafana
 
-Firmware: **v1.27.0**. The device exposes a pull exporter; Prometheus connects to the ESP32-P4.
+Firmware: **v1.27.5**. The device exposes a pull exporter; Prometheus connects to the ESP32-P4.
 
 1. Open `/prometheus` on the device. Set the collector host reference, exporter port and scrape interval. Defaults are port **80** and interval **15 s**.
 2. Download `/prometheus.yml` or add the job below. Use the **device address** in `targets`; the collector host setting is not the scrape target.
@@ -45,4 +45,4 @@ increase(ultrasonic_errors_total[5m])
 
 Use Celsius, centimeters, or degrees for the corresponding panels. Scrapes are snapshots; use [radar CSV recording](RADAR_TRACKING.md) for individual measurement batches and servo transitions.
 
-Target tracking was removed in v1.27.0. Compatibility metrics radar_tracking_enabled/radar_target_locked remain 0; target distance and angle remain NaN. They no longer represent active target selection.
+Target tracking was removed in v1.26.0. Compatibility metrics radar_tracking_enabled/radar_target_locked remain 0; target distance and angle remain NaN. They no longer represent active target selection.

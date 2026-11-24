@@ -53,7 +53,9 @@ void UltrasonicService::finish(uint32_t pulseUs, const char* error) {
     if (!error && distance >= 2.0f && distance <= 400.0f)
         _echoDistances[_validEchoCount++] = distance;
 
-    if (++_echoCount < 3) return;
+    // Fit an agreeing pair into a 200 ms sweep dwell without mixing servo positions.
+    const uint8_t requiredEchoes = radarServo.sweeping() ? 2 : 3;
+    if (++_echoCount < requiredEchoes) return;
 
     _sampleAt = _lastTrigger;
     _batchDistance = NAN;
@@ -119,8 +121,11 @@ void UltrasonicService::handle(bool paused) {
         systemLog.record("SONAR", "leituras=%lu erros=%lu distancia_cm=%.1f angulo=%d erro=%s",
             (unsigned long)_samples, (unsigned long)_errors, _distance, _sampleAngle, _error);
     }
-    if (now - _lastTrigger < ULTRASONIC_INTERVAL_MS) return;
-    if (radarServo.enabled() && now - radarServo.lastMoveAt() < ULTRASONIC_SETTLE_MS) return;
+    const bool sweeping = radarServo.sweeping();
+    const uint32_t interval = sweeping ? ULTRASONIC_SWEEP_INTERVAL_MS : ULTRASONIC_INTERVAL_MS;
+    const uint32_t settle = sweeping ? ULTRASONIC_SWEEP_SETTLE_MS : ULTRASONIC_SETTLE_MS;
+    if (now - _lastTrigger < interval) return;
+    if (radarServo.enabled() && now - radarServo.lastMoveAt() < settle) return;
     _lastTrigger = now;
     _pendingAngle = radarServo.angle();
     _pendingMoveAt = radarServo.lastMoveAt();

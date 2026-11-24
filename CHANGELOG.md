@@ -7,6 +7,36 @@ Firmware history for the ESP32-P4 Radar & Network Monitor. Version numbers refer
 - Rewrite the GitHub README and English reference guides around the current firmware, including the radar CSV workflow.
 - Reconcile installation, pin mappings, command examples, and telemetry references. Documentation only; the firmware version is unchanged.
 
+## v1.27.5 — 2026-11-23
+
+- Inspect the user's v1.27.4 ELF without rebuilding it: CSI still calls the original heap_caps_calloc, and the wrapper is absent from linked code. The helper's ldflags were ignored.
+- Enable Arduino's mixed precompiled-library discovery with precompiled=true and a valid empty ESP32-P4 GNU archive. Continue compiling the helper source; provide no precompiled machine code.
+- Verify interception with a small internal-memory probe before CSI startup. Report dma_fix_active and dma_internal_allocations in camera_status and the SD log. Fail at dma_allocator with an explicit installation message if interception is missing.
+- Update and reinstall the helper. No firmware compilation or flashing; successful CSI recovery still requires validation on the board.
+
+## v1.27.4 — 2026-11-23
+
+- Confirm v1.27.3 on the running board and reproduce the same DW-GDMA internal-RAM error from its SD log. Remove the ineffective malloc-threshold workaround: explicit capability-aware calloc bypasses it.
+- Add the project-provided CameraDmaFix Arduino library and installer. Wrap heap_caps_calloc at link time and add internal-memory capability only to default allocations made by the task starting CSI, outside interrupts. Preserve explicit PSRAM allocations and other tasks; do not modify the SDK.
+- Install the helper in the configured workstation sketchbook, C:/Arduino. Document the extra build dependency. Firmware compilation, flashing, and camera recovery validation remain with the user.
+
+## v1.27.3 — 2026-11-23
+
+- Diagnose the CSI startup failure from the running board's SD log: DW-GDMA rejects a callback context allocated outside internal RAM (`user context not in internal RAM`).
+- Temporarily prefer internal RAM for default allocations during CSI startup. Restore Arduino's configured allocation threshold on both success and failure, before JPEG allocation. Explicit PSRAM image allocations remain unchanged.
+- This allocation policy is process-wide during the short startup call; concurrent default allocations also prefer internal RAM in that window. Hardware recovery still requires compilation and installation by the user.
+
+## v1.27.2 — 2026-11-23
+
+- Align camera startup with the Arduino ESP32 4.0.0 example: open/configure/start CSI before initializing the JPEG encoder and its buffers.
+- Check SCCB/CSI configuration return values and report initialization stage, saved errno, and PSRAM detection in camera_status.
+- Log free/largest internal DMA memory before CSI starts. Preserve existing orientation, stream routes, and cleanup on failure.
+- This is a startup adjustment and diagnostic improvement; successful camera recovery requires validation on the board. No firmware compilation or flashing performed.
+## v1.27.1 — 2026-11-23
+
+- Set the continuous sweep to 5° per 200 ms: about 6.8 seconds per 170° pass, before application delays.
+- Fit ultrasonic measurements into each sweep dwell with a 50 ms settling wait, 70 ms trigger interval, and two agreeing echoes. Preserve three-attempt batches and 100 ms timing for stationary measurements.
+- Keep endpoint reversal, manual positioning, OTA pause, and exclusion of target tracking. Hardware timing and sensor stability remain unvalidated.
 ## v1.27.0 — 2026-11-23
 
 - Target Arduino ESP32 4.0.0 / ESP-IDF 6.1.1. Replace the ESP-MQTT dependency missing from the installed P4 package with bundled official ArduinoMqttClient 0.1.8 sources.

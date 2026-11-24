@@ -6,6 +6,9 @@
 #include <esp32-hal-i2c.h>
 #include <esp_heap_caps.h>
 #include <math.h>
+#include <errno.h>
+#include <string.h>
+#include <CameraDmaFix.h>
 
 CameraService camera;
 
@@ -38,26 +41,62 @@ void CameraService::fail(const char* message) {
     free(_rotated); _rotated = nullptr;
     if (_mutex) { vSemaphoreDelete(_mutex); _mutex = nullptr; }
     Serial.printf("[CAMERA] %s\n", message);
-    systemLog.record("CAMERA", "falha: %s", message);
+    systemLog.record("CAMERA", "falha etapa=%s errno=%d: %s", _initStage, _initErrno, message);
 }
 
 void CameraService::begin() {
+    if (_task || _ready) return;
+    _initStage = "wire_psram"; _initErrno = 0;
     // Reuse Wire's IDF bus: allocating a second bus on GPIO7/8 would detach OLED/audio.
     auto bus = static_cast<i2c_master_bus_handle_t>(i2cBusHandle(0));
     if (!bus || !psramFound()) { fail("I2C Wire ou PSRAM indisponivel"); return; }
+    _initStage = "csi_init"; errno = 0;
     ESPVideoCamConfigClass sensor;
-    sensor.begin(bus, 100000);
-    ESPVideoCSIConfigClass csi; csi.begin(sensor);
-    if (!_video.begin(csi)) { fail("OV5647 nao detectada: confira cabo CSI e alimentacao"); return; }
-    if (!_capture.begin(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, 2) || !_capture.setFormat(ESP_VIDEO_FORMAT_RGB565)) {
-        fail("Falha ao abrir captura RGB565"); return;
+    if (!sensor.begin(bus, 100000)) { fail("Falha ao configurar SCCB compartilhado"); return; }
+    ESPVideoCSIConfigClass csi;
+    if (!csi.begin(sensor) || !_video.begin(csi)) {
+        _initErrno = errno; fail("OV5647 nao detectada: confira cabo CSI e alimentacao"); return;
+    }
+    _initStage = "capture_open"; errno = 0;
+    if (!_capture.begin(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, 2)) {
+        _initErrno = errno; fail("Falha ao abrir dispositivo de captura"); return;
+    }
+    _initStage = "format_rgb565"; errno = 0;
+    if (!_capture.setFormat(ESP_VIDEO_FORMAT_RGB565)) {
+        _initErrno = errno; fail("Falha ao configurar captura RGB565"); return;
     }
     _width = _capture.getWidth(); _height = _capture.getHeight();
     if (!_width || !_height || _width > 1280 || _height > 1280 || _width % 16 || _height % 16) {
         fail("Resolucao da camera fora do limite 1280x1280 ou alinhamento JPEG"); return;
     }
+    // Match the 4.0.0 ESP_Video example: start CSI before reserving JPEG resources.
+    _initStage = "capture_start"; errno = 0;
+    systemLog.record("CAMERA", "iniciando CSI %ux%u DMA_livre=%lu DMA_maior=%lu",
+        _width, _height, (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA),
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA));
+    bool captureStarted;
+    {
+        // Intercept the driver's explicit capability-aware allocation, scoped
+        // to this task. Ordinary malloc thresholds cannot affect that call.
+        CameraDmaInternalScope internalStartup;
+        _dmaFixActive = internalStartup.ready();
+        errno = 0;
+        captureStarted = _dmaFixActive && _capture.startCapture();
+        _dmaInternalAllocations = internalStartup.allocations();
+        _initErrno = captureStarted ? 0 : errno;
+    }
+    systemLog.record("CAMERA", "DMA fix ativo=%d alocacoes_internas=%u", _dmaFixActive, _dmaInternalAllocations);
+    if (!_dmaFixActive) {
+        _initStage = "dma_allocator";
+        fail("CameraDmaFix sem interceptacao ativa; reinstale biblioteca e reinicie IDE"); return;
+    }
+    if (!captureStarted) {
+        fail("Falha ao iniciar captura CSI"); return;
+    }
+    _initStage = "jpeg_init";
     jpeg_encode_engine_cfg_t engine = {}; engine.timeout_ms = 200;
     if (jpeg_new_encoder_engine(&engine, &_encoder) != ESP_OK) { fail("Falha ao criar encoder JPEG"); return; }
+    _initStage = "jpeg_buffers";
     jpeg_encode_memory_alloc_cfg_t memory = {}; memory.buffer_direction = JPEG_ENC_ALLOC_OUTPUT_BUFFER;
     size_t requested = size_t(_width) * _height * 3 + 1024;
     _buffers[0] = static_cast<uint8_t*>(jpeg_alloc_encoder_mem(requested, &memory, &_capacity));
@@ -73,11 +112,11 @@ void CameraService::begin() {
         fail("Memoria insuficiente para JPEG/rotacao"); return;
     }
     _capacity = min(_capacity, secondCapacity);
-    if (!_capture.startCapture()) { fail("Falha ao iniciar captura CSI"); return; }
+    _initStage = "camera_worker";
     if (xTaskCreatePinnedToCore(run, "camera_jpeg", 8192, this, 1, &_task, 0) != pdPASS) {
         _task = nullptr; fail("Falha ao criar tarefa da camera"); return;
     }
-    _error = "nenhum"; _ready = true;
+    _error = "nenhum"; _ready = true; _initStage = "running";
     systemLog.record("CAMERA", "OV5647 iniciada %ux%u", _width, _height);
     Serial.printf("[CAMERA] OV5647 CSI: %ux%u; JPEG alvo %lu imagens/s.\n", _width, _height,
                   (unsigned long)(1000 / CAMERA_FRAME_INTERVAL_MS));
@@ -139,6 +178,11 @@ String CameraService::status() {
     JsonDocument doc;
     doc["model"] = "OV5647"; doc["interface"] = "MIPI-CSI";
     doc["ready"] = ready(); doc["paused"] = _paused.load(); doc["error"] = _error;
+    doc["init_stage"] = _initStage; doc["init_errno"] = _initErrno;
+    doc["init_errno_text"] = _initErrno ? strerror(_initErrno) : "";
+    doc["psram_found"] = psramFound();
+    doc["dma_fix_active"] = _dmaFixActive;
+    doc["dma_internal_allocations"] = _dmaInternalAllocations;
     doc["available"] = available();
     doc["stream_port"] = _streamPort; doc["stream_path"] = "/stream";
     doc["stream_clients"] = streamClients(); doc["stream_frames"] = streamFrames(); doc["stream_errors"] = streamErrors();

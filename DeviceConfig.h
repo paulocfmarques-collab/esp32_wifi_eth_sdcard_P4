@@ -21,12 +21,14 @@
 #define ULTRASONIC_ECHO_PIN 4 // P6 physical pin 18; never connect 5 V ECHO directly.
 constexpr uint32_t ULTRASONIC_INTERVAL_MS = 100;
 constexpr uint32_t ULTRASONIC_SETTLE_MS = 100;
+constexpr uint32_t ULTRASONIC_SWEEP_INTERVAL_MS = 70; // Exceeds the 60 ms minimum cycle.
+constexpr uint32_t ULTRASONIC_SWEEP_SETTLE_MS = 50;
 constexpr int SERVO_MIN_ANGLE = 5;
 constexpr int SERVO_MAX_ANGLE = 175;
 constexpr uint32_t SERVO_STEP_MS = 20;
 constexpr uint32_t CAMERA_FRAME_INTERVAL_MS = 200; // Target 5 JPEG frames/second.
 constexpr int SERVO_SWEEP_STEP_DEGREES = 5;
-constexpr uint32_t RADAR_SWEEP_INTERVAL_MS = 400; // About 13.6 seconds across the 170-degree arc.
+constexpr uint32_t RADAR_SWEEP_INTERVAL_MS = 200; // About 6.8 seconds across the 170-degree arc.
 #define AUDIO_CODEC_ADDRESS 0x18
 #define AUDIO_MCLK 13
 #define AUDIO_BCLK 12

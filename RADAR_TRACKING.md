@@ -1,6 +1,6 @@
 # Continuous radar sweep and diagnostic recording
 
-Firmware: **v1.27.0**. Target tracking has been removed. The servo stays off at boot.
+Firmware: **v1.27.5**. Target tracking has been removed. The servo stays off at boot.
 
 ## Monitor the environment
 
@@ -9,9 +9,9 @@ Firmware: **v1.27.0**. Target tracking has been removed. The servo stays off at 
 3. Open `tela:7` for the persistent sonar display.
 4. Run `servo:off` to stop, or `servo:angulo:90` for a fixed position.
 
-The sweep advances **5° every 400 ms**, about **13.6 seconds per endpoint-to-endpoint pass** (27.2 seconds out and back) before application delays. It reverses only at the limits. A busy ultrasonic echo can briefly delay a step until completion or the sensor timeout; no valid echo is required to continue. There is no dependency on camera frames, target confirmation, or distance values, and no burst of catch-up steps after a delay. Manual positioning remains 1° per 20 ms. OTA pauses PWM and the sweep resumes without catching up.
+The sweep advances **5° every 200 ms**, about **6.8 seconds per endpoint-to-endpoint pass** (13.6 seconds out and back) before application delays. It reverses only at the limits. A busy ultrasonic echo can briefly delay a step until completion or the sensor timeout; no valid echo is required to continue. There is no dependency on camera frames, target confirmation, or distance values, and no burst of catch-up steps after a delay. Manual positioning remains 1° per 20 ms. OTA pauses PWM and the sweep resumes without catching up.
 
-The interval leaves room for the HC-SR04's existing stabilization and three-echo batch. Distance data remain filtered, published and displayed, but do not decide servo direction. This is environmental scanning, not person tracking or physical angle feedback.
+During sweeping, the HC-SR04 waits 50 ms after a position command, triggers at intervals of at least 70 ms, and requires two agreeing echoes per batch. Stationary operation keeps the original 100 ms timing and three-attempt batch. This prevents the faster sweep from continually discarding unfinished batches. Distance data remain filtered, published and displayed, but do not decide servo direction. This is environmental scanning, not person tracking or physical angle feedback.
 
 The retired servo:rastrear commands cannot enable tracking. Their web controls are removed, and MQTT discovery clears the old tracking buttons and target indicator while preserving other entity IDs. Legacy telemetry fields report false/null; legacy Prometheus tracking flags remain zero and target measurements remain NaN. CSV target columns are retained for compatibility and stay empty.
 

@@ -1,9 +1,10 @@
 # Setup and operations
 
-Current firmware source: **v1.27.0**. Start with the [project overview](README.md) and [hardware guide](MAPA_PINOS_E_ESQUEMA.md).
+Current firmware source: **v1.27.5**. Start with the [project overview](README.md) and [hardware guide](MAPA_PINOS_E_ESQUEMA.md).
 
 ## Build and flash
 
+- Install the included CSI DMA helper once: run `./tools/install-camera-dma-fix.ps1 -Sketchbook 'C:/Arduino'` from PowerShell, using your Arduino sketchbook path. See [Arduino 4 migration](ARDUINO_4_MIGRATION.md). The helper's library metadata supplies a required linker flag; keep it installed as an Arduino library.
 - Use the Waveshare ESP32-P4-Module-DEV-KIT target configuration and Arduino ESP32 **4.0.0**. Install Adafruit SSD1306, Adafruit GFX, and ArduinoJson 7. The Arduino core supplies networking, SD, video, and USB host components. MQTT uses bundled ArduinoMqttClient 0.1.8 over NetworkClient; keep the entire src/ directory with the sketch. No external MQTT library installation is needed.
 - Open `wifi_Eth_SDCard.ino` in its folder with all source files and `partitions.csv`. Select **16 MB Flash Size** and **Custom Partition Scheme**, and **PSRAM Enabled**. The two application slots are **6,553,600 bytes (6.25 MiB) each**. PSRAM does not increase that limit.
 - Install over USB when the device does not already have the matching layout. An OTA application upload does not change the partition table.

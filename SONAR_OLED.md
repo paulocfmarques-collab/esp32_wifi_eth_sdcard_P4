@@ -1,6 +1,6 @@
 # Sonar on the OLED
 
-Firmware: **v1.27.0**. The SSD1306 sonar view is page **8 of 8**, immediately after the camera. Press the GPIO27 button to reach it, send `tela:7`, or use the Sonar on OLED action in the web terminal or Home Assistant. The next button press returns to the clock.
+Firmware: **v1.27.5**. The SSD1306 sonar view is page **8 of 8**, immediately after the camera. Press the GPIO27 button to reach it, send `tela:7`, or use the Sonar on OLED action in the web terminal or Home Assistant. The next button press returns to the clock.
 
 The sonar and camera pages do not switch automatically or enter the idle screensaver. OTA can show progress instead. Opening the sonar does not start the servo; send `servo:on` to sweep.
 
